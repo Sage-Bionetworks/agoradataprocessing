@@ -17,7 +17,7 @@ studiesTableId <- "syn11363298"
 tissuesTableId <- "syn12180244"
 
 scoreDataId <- 'syn11688680'
-targetListOrigId <- "syn8656625"
+targetListOrigId <- "syn12540368"
 networkDataId <- "syn11685347"
 
 targetListOutputFile <- "./targetList.csv"
@@ -108,9 +108,10 @@ fromBiomart <- biomaRt::getBM(attributes=c("hgnc_symbol", "ensembl_gene_id"),
 
 # Use mygene.info to get name and summary
 geneInfoRes <- mygene::getGenes(fromBiomart$ensembl_gene_id,
-                             fields=c("symbol", "name", "summary"))
+                                fields=c("symbol", "name", "summary", "type_of_gene"))
 
 geneInfo <- geneInfoRes %>%
+  as.data.frame() %>%
   as.tibble() %>%
   group_by(query) %>%
   top_n(1, X_score) %>%
@@ -150,35 +151,53 @@ fGeneExprDataCsv <- synStore(File(paste0(fGeneExprDataOutputFilePrefix, ".csv"),
                              forceVersion=FALSE)
 
 # Add to gene info
-igap <- synGet("syn12514826")$path %>% readr::read_csv()
+igapDataId <- "syn12514826"
+igap <- synGet(igapDataId)$path %>% readr::read_csv()
+
+geneInfoFinal <- geneInfoFinal %>%
+  mutate(isIGAP=ensembl_gene_id %in% igap$ensembl_gene_id)
+
+eqtlDataId <- "syn12514912"
+eqtl <- synGet(eqtlDataId)$path %>% readr::read_csv() %>%
+  dplyr::select(ensembl_gene_id, haseqtl=hasEqtl)
+
+geneInfoFinal <- geneInfoFinal %>% left_join(eqtl)
+geneInfoFinal$haseqtl[is.na(geneInfoFinal$haseqtl)] <- FALSE
+
+medianExprDataId <- "syn12514804"
+medianExprData <- readr::read_csv(synGet(medianExprDataId)$path) %>%
+  filter(ensembl_gene_id %in% geneExprData$ensembl_gene_id) %>%
+  dplyr::rename_all(tolower)
+
+nestedMedianExprData <- medianExprData %>%
+  group_by(ensembl_gene_id) %>%
+  nest(.key='medianexpression')
+
+geneInfoFinal <- left_join(geneInfoFinal, nestedMedianExprData)
 
 ####### Process target list
 targetListOrig <- synGet(targetListOrigId)$path %>%
-  readr::read_csv()
+  readr::read_csv() %>%
+  dplyr::select(-hgnc_symbol) %>%
+  dplyr::rename_all(tolower) %>%
+  mutate(data_synapseid=stringr::str_split(data_synapseid, ","))
 
-targetList <- targetListOrig %>%
-  dplyr::select(center=group, hgnc_symbol=gene_symbol, ensembl_gene_id=ensembl_id)
+nestedTargetListOrig <- targetListOrig %>%
+  group_by(ensembl_gene_id) %>%
+  nest(.key='nominatedtarget')
 
-readr::write_csv(targetList, targetListOutputFile)
+geneInfoFinal <- left_join(geneInfoFinal, nestedTargetListOrig)
 
-fTargetList <- synStore(File(targetListOutputFile,
-                             parent=wotFolderId),
-                        used=targetListOrigId, forceVersion=FALSE)
+geneInfoFinal %>%
+  jsonlite::toJSON() %>%
+  readr::write_lines(paste0("./gene_info", ".json"))
 
-targetListDistinct <- targetList %>%
-  dplyr::group_by(hgnc_symbol, ensembl_gene_id) %>%
-  dplyr::mutate(centers=paste(center, collapse=", "),
-                nominations=length(unique(center))) %>%
-  dplyr::ungroup() %>%
-  dplyr::select(-center) %>%
-  dplyr::distinct() %>%
-  dplyr::arrange(-nominations)
+geneInfoFinalJSON <- synStore(File(paste0("./gene_info", ".json"),
+                                   parent=wotFolderId),
+                              used=c(geneExprDataId, igapDataId, eqtlDataId, medianExprDataId,
+                                     targetListOrigId),
+                              forceVersion=FALSE)
 
-readr::write_csv(targetList, targetListDistinctOutputFile)
-
-fTargetListDistinct <- synStore(File(targetListDistinctOutputFile,
-                                     parent=wotFolderId),
-                                used=fTargetList, forceVersion=FALSE)
 
 network <- readr::read_csv(synGet(networkDataId)$path)
 
@@ -216,9 +235,6 @@ networkDataCsv <- synStore(File(paste0(networkOutputFilePrefix, ".csv"),
                            used=c(geneExprDataId, networkDataId),
                            forceVersion=FALSE)
 
-medianExprDataId <- "syn12514804"
-medianExprData <- readr::read_csv(synGet(medianExprDataId)$path) %>%
-  filter(ensembl_gene_id %in% geneExprData$ensembl_gene_id)
 
 medianExprData %>%
   jsonlite::toJSON() %>%
