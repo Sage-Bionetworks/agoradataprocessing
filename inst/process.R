@@ -1,5 +1,8 @@
 library(tidyverse)
+library(mygene)
 library(synapser)
+library(biomaRt)
+
 # library(assertr)
 
 synLogin()
@@ -24,6 +27,7 @@ networkOutputFile <- "./network.csv"
 networkNodesOutputFile <- "./network_nodes.csv"
 networkEdgesOutputFile <- "./network_edges.csv"
 networkOutputFileJson <- "./network.json"
+networkOutputFilePrefix <- "./network"
 
 targetListOutputFile <- "./targetList_IGAP.csv"
 targetListDistinctOutputFile <- "./targetListDistinct_IGAP.csv"
@@ -40,50 +44,100 @@ geneFPKMLongOutputFile <- "./geneFPKMLong.feather"
 studiesTable <- synapser::synTableQuery(glue::glue("select * from {studiesTableId}")) %>%
   as.data.frame() %>%
   tibble::as_tibble() %>%
-  select(-ROW_ID, -ROW_VERSION) %>%
-  rename(studyid=Study, studyname=StudyName)
+  dplyr::select(-ROW_ID, -ROW_VERSION) %>%
+  dplyr::rename(studyid=Study, studyname=StudyName)
 
 tissuesTable <- synapser::synTableQuery(glue::glue("select * from {tissuesTableId}")) %>%
   as.data.frame() %>%
   tibble::as_tibble() %>%
-  select(-ROW_ID, -ROW_VERSION)
+  dplyr::select(-ROW_ID, -ROW_VERSION)
 
 tissuesLookup <- setNames(as.character(tissuesTable$name),
                           tissuesTable$shortname)
 
-### Process gene expression (logfc and CI) data
+keep <- c("Diagnosis AD-CONTROL ALL",
+          "Diagnosis.AOD AD-CONTROL ALL",
+          "Diagnosis.Sex AD-CONTROL FEMALE",
+          "Diagnosis.Sex AD-CONTROL MALE")
+
+# Process gene expression (logfc and CI) data
+# Drop existing gene symbol and add them later.
 geneExprData <- synapser::synGet(geneExprDataId)$path %>%
-  read_tsv() %>%
-  filter(stringr::str_detect(Model, "Diagnosis")) %>%
-  mutate(hgnc_symbol=ifelse(is.na(hgnc_symbol), ensembl_gene_id, hgnc_symbol),
-         Study=stringr::str_replace(Study, "MAYO", "MayoRNAseq"),
-         Study=stringr::str_replace(Study, "MSSM", "MSBB"),
-         Tissue=stringr::str_replace_all(Tissue, tissuesLookup),
-         Model=stringr::str_replace(Model, "\\.", " x "),
-         Model=stringr::str_replace(Model, "SourceDiagnosis", "Study-specific Diagnosis"),
-         neg.log10.adj.P.Val=round(-log10(adj.P.Val), digits=3),
-         logFC=round(logFC, digits = 3)
-         ) %>%
+  readr::read_tsv() %>%
+  dplyr::mutate(tmp=paste(Model, Comparison, Sex, sep=" ")) %>%
+  dplyr::filter(tmp %in% keep) %>%
+  dplyr::select(-tmp) %>%
+  dplyr::mutate(Study=stringr::str_replace(Study, "MAYO", "MayoRNAseq"),
+                Study=stringr::str_replace(Study, "MSSM", "MSBB"),
+                Sex=stringr::str_replace_all(Sex,
+                                             c("ALL"="Males and females",
+                                               "FEMALE"="Females only",
+                                               "MALE"="Males only")),
+                # Tissue=stringr::str_replace_all(Tissue, tissuesLookup),
+                Model=stringr::str_replace(Model, "\\.", " x "),
+                Model=stringr::str_replace(Model, "SourceDiagnosis", "Study-specific Diagnosis"),
+                logFC=round(logFC, digits = 3)
+  ) %>%
   assertr::verify(Study %in% studiesTable$studyname) %>%
-  tidyr::unite("tissue_study", Tissue, Study, sep=", ", remove=FALSE) %>%
-  tidyr::unite("comparison_model_sex", Comparison, Model, Sex, sep=", ", remove=FALSE) %>%
-  dplyr::mutate(tissue_study_pretty=glue::glue("{tissue} ({study})",
-                                               tissue=Tissue, study=Study),
-                comparison_model_sex_pretty=glue::glue("{comparison} {model} ({sex})",
-                                                       comparison=Comparison, model=Model, sex=Sex))
+  dplyr::mutate(model=glue::glue("{model} ({sex})", model=Model, sex=Sex))
+
+
+# # Maybe for filtering by p-value
+# geneExprData <- geneExprData %>%
+#   filter(adj_p_val <= 0.001) %>%
+#   dplyr::select(ensembl_gene_id) %>%
+#   distinct() %>%
+#   left_join(., geneExprData)
 
 geneExprData <- geneExprData %>%
-  select(hgnc_symbol, ensembl_gene_id, logFC, AveExpr, CI.L, CI.R, adj.P.Val, neg.log10.adj.P.Val,
-         tissue_study_pretty, comparison_model_sex_pretty)
+  dplyr::select(ensembl_gene_id, logFC, CI.L, CI.R, adj.P.Val, Tissue, Study, model=model)
 
 colnames(geneExprData) <- gsub("\\.", "_", tolower(colnames(geneExprData)))
+
+# For unique list of genes
+geneTable <- geneExprData %>%
+  dplyr::select(ensembl_gene_id) %>%
+  distinct()
+
+# Get current hgnc symbol from biomart
+ensembl <- biomaRt::useMart("ensembl", dataset="hsapiens_gene_ensembl")
+fromBiomart <- biomaRt::getBM(attributes=c("hgnc_symbol", "ensembl_gene_id"),
+                              filters="ensembl_gene_id",
+                              values=geneTable$ensembl_gene_id,
+                              mart=ensembl)
+
+# Use mygene.info to get name and summary
+geneInfoRes <- mygene::getGenes(fromBiomart$ensembl_gene_id,
+                             fields=c("symbol", "name", "summary"))
+
+geneInfo <- geneInfoRes %>%
+  as.tibble() %>%
+  group_by(query) %>%
+  top_n(1, X_score) %>%
+  ungroup()
+
+geneInfo <- left_join(fromBiomart, geneInfo,
+                      by=c('ensembl_gene_id'='query',
+                           'hgnc_symbol'='symbol')) %>%
+  as.tibble() %>%
+  distinct()
+
+geneInfoFinal <- geneInfo %>%
+  dplyr::select(ensembl_gene_id, hgnc_symbol, name, summary) %>%
+  mutate(symbol=ifelse(is.na(hgnc_symbol), ensembl_gene_id, hgnc_symbol)) %>%
+  group_by(ensembl_gene_id) %>%
+  summarize(n=n_distinct(hgnc_symbol)) %>%
+  left_join(geneInfo, .) %>%
+  arrange(desc(n), ensembl_gene_id) %>%
+  filter(!is.na(X_id)) %>%
+  dplyr::select(ensembl_gene_id, hgnc_symbol, name, summary)
+
+geneExprData <- left_join(geneExprData,
+                          geneInfoFinal %>% dplyr::select(ensembl_gene_id, hgnc_symbol))
 
 geneExprData %>%
   jsonlite::toJSON() %>%
   readr::write_lines(paste0(fGeneExprDataOutputFilePrefix, ".json"))
-
-readr::write_csv(geneExprData,
-                 paste0(fGeneExprDataOutputFilePrefix, ".csv"))
 
 fGeneExprDataJSON <- synStore(File(paste0(fGeneExprDataOutputFilePrefix, ".json"),
                                    parent=wotFolderId),
@@ -95,30 +149,15 @@ fGeneExprDataCsv <- synStore(File(paste0(fGeneExprDataOutputFilePrefix, ".csv"),
                              used=c(geneExprDataId, tissuesTableId, studiesTableId),
                              forceVersion=FALSE)
 
-IMSR <- synGet(IMSRId)$path %>%
-  readr::read_csv() %>%
-  dplyr::select(`Strain ID`, `Strain/Stock`, Repository, `Gene Symbol`, URL) %>%
-  dplyr::mutate(`Gene Symbol`=toupper(`Gene Symbol`)) %>%
-  dplyr::mutate(`Strain/Stock`=stringr::str_c("<a href='", URL, "'>", `Strain/Stock`, "</a>"))
-
-feather::write_feather(IMSR, IMSROutputFile)
-fIMSR <- synStore(File(IMSROutputFile,
-                       parent=wotFolderId),
-                  used=c(IMSRId),
-                  forceVersion=FALSE)
-
-
-
-scoreData <- synGet(scoreDataId)$path %>%
-  readr::read_csv() %>%
-  dplyr::rename(ensembl.gene=gene, Score=adDriverScore, Gene=external_gene_name)
+# Add to gene info
+igap <- synGet("syn12514826")$path %>% readr::read_csv()
 
 ####### Process target list
 targetListOrig <- synGet(targetListOrigId)$path %>%
   readr::read_csv()
 
 targetList <- targetListOrig %>%
-  dplyr::select(Center=group, Gene=gene_symbol, ensembl.gene=ensembl_id)
+  dplyr::select(center=group, hgnc_symbol=gene_symbol, ensembl_gene_id=ensembl_id)
 
 readr::write_csv(targetList, targetListOutputFile)
 
@@ -127,11 +166,11 @@ fTargetList <- synStore(File(targetListOutputFile,
                         used=targetListOrigId, forceVersion=FALSE)
 
 targetListDistinct <- targetList %>%
-  dplyr::group_by(Gene, ensembl.gene) %>%
-  dplyr::mutate(Centers=paste(Center, collapse=", "),
-                nominations=length(unique(Center))) %>%
+  dplyr::group_by(hgnc_symbol, ensembl_gene_id) %>%
+  dplyr::mutate(centers=paste(center, collapse=", "),
+                nominations=length(unique(center))) %>%
   dplyr::ungroup() %>%
-  dplyr::select(-Center) %>%
+  dplyr::select(-center) %>%
   dplyr::distinct() %>%
   dplyr::arrange(-nominations)
 
@@ -141,54 +180,107 @@ fTargetListDistinct <- synStore(File(targetListDistinctOutputFile,
                                      parent=wotFolderId),
                                 used=fTargetList, forceVersion=FALSE)
 
-targetManifest <- scoreData %>%
-  dplyr::filter(Gene %in% targetListDistinct$Gene) %>%
-  dplyr::select(Gene, Score) %>%
-  dplyr::mutate(Score=round(Score, 1)) %>%
-  dplyr::arrange(-Score)
-
-readr::write_csv(targetManifest, targetManifestOutputFile)
-
-fTargetManifest <- synStore(File(targetManifestOutputFile,
-                                 parent=wotFolderId),
-                            used=c(fTargetListDistinct, scoreDataId),
-                            forceVersion=FALSE)
-
-
 network <- readr::read_csv(synGet(networkDataId)$path)
 
-network2 <- network %>%
-  dplyr::group_by(geneA_ensembl_gene_id, geneB_ensembl_gene_id,
-           geneA_external_gene_name, geneB_external_gene_name) %>%
-  dplyr::summarize(value=n_distinct(brainRegion)) %>%
-  #  regions=paste(unique(brainRegion), collapse=","))
-  dplyr::ungroup() %>%
-  dplyr::distinct() %>%
-  dplyr::filter(value > 1)
+network <- network %>%
+  dplyr::select(geneA_ensembl_gene_id, geneB_ensembl_gene_id, brainRegion) %>%
+  left_join(., geneExprData %>% dplyr::select(ensembl_gene_id, hgnc_symbol) %>% distinct(),
+            by=c("geneA_ensembl_gene_id"="ensembl_gene_id")) %>%
+  dplyr::rename(geneA_external_gene_name=hgnc_symbol) %>%
+  left_join(., geneExprData %>% dplyr::select(ensembl_gene_id, hgnc_symbol) %>% distinct(),
+            by=c("geneB_ensembl_gene_id"="ensembl_gene_id")) %>%
+  dplyr::rename(geneB_external_gene_name=hgnc_symbol)
 
-network2 <- network2 %>%
-  dplyr::left_join(network) %>%
-  dplyr::group_by(geneA_ensembl_gene_id, geneB_ensembl_gene_id,
-                  geneA_external_gene_name, geneB_external_gene_name, value) %>%
-  dplyr::summarize(title=paste(unique(brainRegion), collapse=",")) %>%
-  dplyr::ungroup()
+network <- network %>%
+  mutate(geneA_external_gene_name=ifelse(is.na(geneA_external_gene_name),
+                                         geneA_ensembl_gene_id, geneA_external_gene_name),
+         geneB_external_gene_name=ifelse(is.na(geneB_external_gene_name),
+                                         geneB_ensembl_gene_id, geneB_external_gene_name))
 
-nodesForNetwork <- dplyr::bind_rows(network2 %>%
-                                      dplyr::select(gene=geneA_ensembl_gene_id,
-                                                    symbol=geneA_external_gene_name),
-                                    network2 %>%
-                                      dplyr::select(gene=geneB_ensembl_gene_id,
-                                                    symbol=geneB_external_gene_name)) %>%
-  dplyr::distinct() %>%
-  dplyr::mutate(label=ifelse(is.na(symbol), gene, symbol)) %>%
-  dplyr::select(id=gene, label) %>%
-  dplyr::left_join(scoreData %>% dplyr::select(id=ensembl.gene, Score)) %>%
-  dplyr::mutate(title=sprintf("score: %0.1f", Score)) %>%
-  dplyr::mutate(color=cut(Score, breaks=c(-Inf, 0, 2, 4, Inf),
-                          labels=c("red", "yellow", "orange", "green")))
 
-edgesForNetwork <- network2 %>%
-  dplyr::select(from=geneA_ensembl_gene_id, to=geneB_ensembl_gene_id, value, title)
+network <- network %>%
+  filter(geneA_ensembl_gene_id %in% geneExprData$ensembl_gene_id,
+         geneB_ensembl_gene_id %in% geneExprData$ensembl_gene_id)
+
+network %>%
+  jsonlite::toJSON() %>%
+  readr::write_lines(paste0(networkOutputFilePrefix, ".json"))
+
+networkDataJSON <- synStore(File(paste0(networkOutputFilePrefix, ".json"),
+                                 parent=wotFolderId),
+                            used=c(geneExprDataId, networkDataId),
+                            forceVersion=FALSE)
+
+networkDataCsv <- synStore(File(paste0(networkOutputFilePrefix, ".csv"),
+                                parent=wotFolderId),
+                           used=c(geneExprDataId, networkDataId),
+                           forceVersion=FALSE)
+
+medianExprDataId <- "syn12514804"
+medianExprData <- readr::read_csv(synGet(medianExprDataId)$path) %>%
+  filter(ensembl_gene_id %in% geneExprData$ensembl_gene_id)
+
+medianExprData %>%
+  jsonlite::toJSON() %>%
+  readr::write_lines(paste0("./median_expression", ".json"))
+
+medianExprDataJSON <- synStore(File(paste0("./median_expression", ".json"),
+                                    parent=wotFolderId),
+                               used=c(geneExprDataId, medianExprDataId),
+                               forceVersion=FALSE)
+
+# network2 <- network %>%
+#   dplyr::group_by(geneA_ensembl_gene_id, geneB_ensembl_gene_id,
+#                   geneA_external_gene_name, geneB_external_gene_name) %>%
+#   dplyr::summarize(value=n_distinct(brainRegion)) %>%
+#   #  regions=paste(unique(brainRegion), collapse=","))
+#   dplyr::ungroup() %>%
+#   dplyr::distinct()
+#   # %>%
+#   # dplyr::filter(value > 1)
+#
+# network2 <- network2 %>%
+#   dplyr::left_join(network) %>%
+#   dplyr::group_by(geneA_ensembl_gene_id, geneB_ensembl_gene_id,
+#                   geneA_external_gene_name, geneB_external_gene_name, value) %>%
+#   dplyr::summarize(title=paste(unique(brainRegion), collapse=",")) %>%
+#   dplyr::ungroup()
+#
+# nodesForNetwork <- dplyr::bind_rows(network2 %>%
+#                                       dplyr::select(gene=geneA_ensembl_gene_id,
+#                                                     symbol=geneA_external_gene_name),
+#                                     network2 %>%
+#                                       dplyr::select(gene=geneB_ensembl_gene_id,
+#                                                     symbol=geneB_external_gene_name)) %>%
+#   dplyr::distinct() %>%
+#   dplyr::mutate(label=ifelse(is.na(symbol), gene, symbol)) %>%
+#   dplyr::select(id=gene, label) # %>%
+#   # dplyr::left_join(scoreData %>% dplyr::select(id=ensembl.gene, Score)) %>%
+#   # dplyr::mutate(title=sprintf("score: %0.1f", Score)) %>%
+#   # dplyr::mutate(color=cut(Score, breaks=c(-Inf, 0, 2, 4, Inf),
+#   #                         labels=c("red", "yellow", "orange", "green")))
+#
+# edgesForNetwork <- network2 %>%
+#   dplyr::select(from=geneA_ensembl_gene_id, to=geneB_ensembl_gene_id, value, title)
+
+# IMSR <- synGet(IMSRId)$path %>%
+#   readr::read_csv() %>%
+#   dplyr::select(`Strain ID`, `Strain/Stock`, Repository, `Gene Symbol`, URL) %>%
+#   dplyr::mutate(`Gene Symbol`=toupper(`Gene Symbol`)) %>%
+#   dplyr::mutate(`Strain/Stock`=stringr::str_c("<a href='", URL, "'>", `Strain/Stock`, "</a>"))
+#
+# feather::write_feather(IMSR, IMSROutputFile)
+# fIMSR <- synStore(File(IMSROutputFile,
+#                        parent=wotFolderId),
+#                   used=c(IMSRId),
+#                   forceVersion=FALSE)
+#
+#
+#
+# scoreData <- synGet(scoreDataId)$path %>%
+#   readr::read_csv() %>%
+#   dplyr::select(ensembl_gene_id=gene, hgnc_symbol=external_gene_name,
+#                 ad_driver_score=adDriverScore)
 
 # druggabilityDataId <- 'syn11420932'
 # druggabilityDataOutputFile <- "./druggabilityData_IGAP.csv"
