@@ -81,13 +81,12 @@ geneExprData <- synapser::synGet(geneExprDataId)$path %>%
   assertr::verify(Study %in% studiesTable$studyname) %>%
   dplyr::mutate(model=glue::glue("{model} ({sex})", model=Model, sex=Sex))
 
-
-# # Maybe for filtering by p-value
-# geneExprData <- geneExprData %>%
-#   filter(adj_p_val <= 0.001) %>%
-#   dplyr::select(ensembl_gene_id) %>%
-#   distinct() %>%
-#   left_join(., geneExprData)
+# Maybe for filtering by p-value
+geneExprData <- geneExprData %>%
+  filter(adj.P.Val <= 0.001) %>%
+  dplyr::select(ensembl_gene_id) %>%
+  distinct() %>%
+  left_join(., geneExprData)
 
 geneExprData <- geneExprData %>%
   dplyr::select(ensembl_gene_id, logFC, CI.L, CI.R, adj.P.Val, Tissue, Study, model=model)
@@ -108,7 +107,8 @@ fromBiomart <- biomaRt::getBM(attributes=c("hgnc_symbol", "ensembl_gene_id"),
 
 # Use mygene.info to get name and summary
 geneInfoRes <- mygene::getGenes(fromBiomart$ensembl_gene_id,
-                                fields=c("symbol", "name", "summary", "type_of_gene"))
+                                fields=c("symbol", "name", "summary",
+                                         "type_of_gene", "alias", "go.MF"))
 
 geneInfo <- geneInfoRes %>%
   as.data.frame() %>%
@@ -116,6 +116,11 @@ geneInfo <- geneInfoRes %>%
   group_by(query) %>%
   top_n(1, X_score) %>%
   ungroup()
+
+# purrr::map_df(geneInfo[["go.MF"]], .f=function(x) ifelse(is.null(x),
+#                                                          data.frame(),
+#                                                          dplyr::select(x[[1]], id, term)))
+# purrr::map(geneInfo[["go.MF"]], .f=class)
 
 geneInfo <- left_join(fromBiomart, geneInfo,
                       by=c('ensembl_gene_id'='query',
@@ -184,7 +189,8 @@ targetListOrig <- synGet(targetListOrigId)$path %>%
 
 nestedTargetListOrig <- targetListOrig %>%
   group_by(ensembl_gene_id) %>%
-  nest(.key='nominatedtarget')
+  nest(.key='nominatedtarget') %>%
+  mutate(nominations=purrr::map_int(nominatedtarget, nrow))
 
 geneInfoFinal <- left_join(geneInfoFinal, nestedTargetListOrig)
 
