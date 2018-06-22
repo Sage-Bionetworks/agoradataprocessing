@@ -2,21 +2,18 @@ library(tidyverse)
 library(mygene)
 library(synapser)
 library(biomaRt)
-
-# library(assertr)
+library(assertr)
 
 synLogin()
 
 wotFolderId <- 'syn12177492'
 
 geneExprDataId <- 'syn11180450'
-IMSRId <- 'syn11149859'
 geneFPKMId <- "syn5581268"
 geneCovariatesId <- "syn5581227"
 studiesTableId <- "syn11363298"
 tissuesTableId <- "syn12180244"
 
-scoreDataId <- 'syn11688680'
 targetListOrigId <- "syn12540368"
 networkDataId <- "syn11685347"
 
@@ -24,22 +21,10 @@ targetListOutputFile <- "./targetList.csv"
 targetListDistinctOutputFile <- "./targetListDistinct.csv"
 targetManifestOutputFile <- "./targetManifest.csv"
 networkOutputFile <- "./network.csv"
-networkNodesOutputFile <- "./network_nodes.csv"
-networkEdgesOutputFile <- "./network_edges.csv"
 networkOutputFileJson <- "./network.json"
 networkOutputFilePrefix <- "./network"
 
-targetListOutputFile <- "./targetList_IGAP.csv"
-targetListDistinctOutputFile <- "./targetListDistinct_IGAP.csv"
-targetManifestOutputFile <- "./targetManifest_GAP.csv"
-
 fGeneExprDataOutputFilePrefix <- "./geneExprData"
-IMSROutputFilePrefix <- "./IMSR_processed"
-geneFPKMLongOutputFilePrefix <- "./geneFPKMLong"
-
-fGeneExprDataOutputFile <- "./geneExprData.feather"
-IMSROutputFile <- "./IMSR_processed.feather"
-geneFPKMLongOutputFile <- "./geneFPKMLong.feather"
 
 studiesTable <- synapser::synTableQuery(glue::glue("select * from {studiesTableId}")) %>%
   as.data.frame() %>%
@@ -60,6 +45,32 @@ keep <- c("Diagnosis AD-CONTROL ALL",
           "Diagnosis.Sex AD-CONTROL FEMALE",
           "Diagnosis.Sex AD-CONTROL MALE")
 
+# Team info
+teamInfoId <- "syn12615624"
+teamMemberInfoId <- "syn12615633"
+
+teamMemberInfo <- synGet(teamMemberInfoId)$path %>%
+  readr::read_csv() %>%
+  group_by(team) %>%
+  nest(.key="members")
+
+teamInfo <- synGet(teamInfoId)$path %>%
+  readr::read_csv() %>%
+  left_join(teamMemberInfo)
+
+####### Process target list
+targetListOrig <- synGet(targetListOrigId)$path %>%
+  readr::read_csv() %>%
+  dplyr::select(-hgnc_symbol) %>%
+  dplyr::rename_all(tolower) %>%
+  mutate(data_synapseid=stringr::str_split(data_synapseid, ",")) %>%
+  assertr::verify(team %in% teamInfo$team)
+
+nestedTargetListOrig <- targetListOrig %>%
+  group_by(ensembl_gene_id) %>%
+  nest(.key='nominatedtarget') %>%
+  mutate(nominations=purrr::map_int(nominatedtarget, nrow))
+
 # Process gene expression (logfc and CI) data
 # Drop existing gene symbol and add them later.
 geneExprData <- synapser::synGet(geneExprDataId)$path %>%
@@ -76,20 +87,22 @@ geneExprData <- synapser::synGet(geneExprDataId)$path %>%
                 # Tissue=stringr::str_replace_all(Tissue, tissuesLookup),
                 Model=stringr::str_replace(Model, "\\.", " x "),
                 Model=stringr::str_replace(Model, "SourceDiagnosis", "Study-specific Diagnosis"),
-                logFC=round(logFC, digits = 3)
+                logFC=round(logFC, digits = 3),
+                fc=2**logFC
   ) %>%
   assertr::verify(Study %in% studiesTable$studyname) %>%
   dplyr::mutate(model=glue::glue("{model} ({sex})", model=Model, sex=Sex))
 
-# Maybe for filtering by p-value
+# Maybe for filtering by p-value for a gene
+# that is significant in at least one model
 geneExprData <- geneExprData %>%
-  filter(adj.P.Val <= 0.001) %>%
+  filter(adj.P.Val <= 0.001 | (ensembl_gene_id %in% nestedTargetListOrig$ensembl_gene_id)) %>%
   dplyr::select(ensembl_gene_id) %>%
   distinct() %>%
   left_join(., geneExprData)
 
 geneExprData <- geneExprData %>%
-  dplyr::select(ensembl_gene_id, logFC, CI.L, CI.R, adj.P.Val, Tissue, Study, model=model)
+  dplyr::select(ensembl_gene_id, logFC, fc, CI.L, CI.R, adj.P.Val, Tissue, Study, model)
 
 colnames(geneExprData) <- gsub("\\.", "_", tolower(colnames(geneExprData)))
 
@@ -106,7 +119,7 @@ fromBiomart <- biomaRt::getBM(attributes=c("hgnc_symbol", "ensembl_gene_id"),
                               mart=ensembl)
 
 # Use mygene.info to get name and summary
-geneInfoRes <- mygene::getGenes(fromBiomart$ensembl_gene_id,
+geneInfoRes <- mygene::getGenes(geneTable$ensembl_gene_id,
                                 fields=c("symbol", "name", "summary",
                                          "type_of_gene", "alias", "go.MF"))
 
@@ -115,45 +128,26 @@ geneInfo <- geneInfoRes %>%
   as.tibble() %>%
   group_by(query) %>%
   top_n(1, X_score) %>%
-  ungroup()
+  ungroup() %>%
+  mutate(go.MF=purrr::map(go.MF, tibble::as_tibble))
 
-# purrr::map_df(geneInfo[["go.MF"]], .f=function(x) ifelse(is.null(x),
-#                                                          data.frame(),
-#                                                          dplyr::select(x[[1]], id, term)))
-# purrr::map(geneInfo[["go.MF"]], .f=class)
-
-geneInfo <- left_join(fromBiomart, geneInfo,
-                      by=c('ensembl_gene_id'='query',
-                           'hgnc_symbol'='symbol')) %>%
+geneInfoMerged <- left_join(geneInfo, fromBiomart,
+                            by=c('query'='ensembl_gene_id',
+                                 'symbol'='hgnc_symbol')) %>%
   as.tibble() %>%
   distinct()
 
-geneInfoFinal <- geneInfo %>%
-  dplyr::select(ensembl_gene_id, hgnc_symbol, name, summary) %>%
-  mutate(symbol=ifelse(is.na(hgnc_symbol), ensembl_gene_id, hgnc_symbol)) %>%
-  group_by(ensembl_gene_id) %>%
-  summarize(n=n_distinct(hgnc_symbol)) %>%
-  left_join(geneInfo, .) %>%
-  arrange(desc(n), ensembl_gene_id) %>%
-  filter(!is.na(X_id)) %>%
-  dplyr::select(ensembl_gene_id, hgnc_symbol, name, summary)
+geneTableMerged <- left_join(geneTable, geneInfoMerged, by=c("ensembl_gene_id"="query"))
 
-geneExprData <- left_join(geneExprData,
-                          geneInfoFinal %>% dplyr::select(ensembl_gene_id, hgnc_symbol))
+geneInfoFinal <- geneTableMerged %>%
+  dplyr::rename(hgnc_symbol=symbol) %>%
+  dplyr::filter(!is.na(X_id)) %>%
+  dplyr::select(-X_id, -X_score)
 
-geneExprData %>%
-  jsonlite::toJSON() %>%
-  readr::write_lines(paste0(fGeneExprDataOutputFilePrefix, ".json"))
-
-fGeneExprDataJSON <- synStore(File(paste0(fGeneExprDataOutputFilePrefix, ".json"),
-                                   parent=wotFolderId),
-                              used=c(geneExprDataId, tissuesTableId, studiesTableId),
-                              forceVersion=FALSE)
-
-fGeneExprDataCsv <- synStore(File(paste0(fGeneExprDataOutputFilePrefix, ".csv"),
-                                  parent=wotFolderId),
-                             used=c(geneExprDataId, tissuesTableId, studiesTableId),
-                             forceVersion=FALSE)
+geneExprDataFinal <- left_join(geneExprData,
+                               geneInfoFinal %>%
+                                 dplyr::select(ensembl_gene_id, hgnc_symbol)) %>%
+  filter(!is.na(hgnc_symbol))
 
 # Add to gene info
 igapDataId <- "syn12514826"
@@ -180,22 +174,54 @@ nestedMedianExprData <- medianExprData %>%
 
 geneInfoFinal <- left_join(geneInfoFinal, nestedMedianExprData)
 
-####### Process target list
-targetListOrig <- synGet(targetListOrigId)$path %>%
-  readr::read_csv() %>%
-  dplyr::select(-hgnc_symbol) %>%
-  dplyr::rename_all(tolower) %>%
-  mutate(data_synapseid=stringr::str_split(data_synapseid, ","))
-
-nestedTargetListOrig <- targetListOrig %>%
-  group_by(ensembl_gene_id) %>%
-  nest(.key='nominatedtarget') %>%
-  mutate(nominations=purrr::map_int(nominatedtarget, nrow))
-
 geneInfoFinal <- left_join(geneInfoFinal, nestedTargetListOrig)
 
+network <- readr::read_csv(synGet(networkDataId)$path)
+
+network <- network %>%
+  filter(geneA_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id,
+         geneB_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id)
+
+
+network <- network %>%
+  dplyr::select(geneA_ensembl_gene_id, geneB_ensembl_gene_id, brainRegion) %>%
+  left_join(., geneInfoFinal %>% dplyr::select(ensembl_gene_id, hgnc_symbol) %>% distinct(),
+            by=c("geneA_ensembl_gene_id"="ensembl_gene_id")) %>%
+  dplyr::rename(geneA_external_gene_name=hgnc_symbol) %>%
+  left_join(., geneInfoFinal %>% dplyr::select(ensembl_gene_id, hgnc_symbol) %>% distinct(),
+            by=c("geneB_ensembl_gene_id"="ensembl_gene_id")) %>%
+  dplyr::rename(geneB_external_gene_name=hgnc_symbol)
+
+
+#########################################
+# Write out all data and store in Synapse
+#########################################
+
+teamInfo %>%
+  jsonlite::toJSON(pretty=2) %>%
+  readr::write_lines("team_info.json")
+
+teamInfoJSON <- synStore(File("team_info.json",
+                              parent=wotFolderId),
+                         used=c(teamInfoId, teamMemberInfoId),
+                         forceVersion=FALSE)
+
+geneExprDataFinal %>%
+  jsonlite::toJSON(pretty=2) %>%
+  readr::write_lines(paste0(fGeneExprDataOutputFilePrefix, ".json"))
+
+fGeneExprDataJSON <- synStore(File(paste0(fGeneExprDataOutputFilePrefix, ".json"),
+                                   parent=wotFolderId),
+                              used=c(geneExprDataId, tissuesTableId, studiesTableId),
+                              forceVersion=FALSE)
+
+# fGeneExprDataCsv <- synStore(File(paste0(fGeneExprDataOutputFilePrefix, ".csv"),
+#                                   parent=wotFolderId),
+#                              used=c(geneExprDataId, tissuesTableId, studiesTableId),
+#                              forceVersion=FALSE)
+
 geneInfoFinal %>%
-  jsonlite::toJSON() %>%
+  jsonlite::toJSON(pretty=2) %>%
   readr::write_lines(paste0("./gene_info", ".json"))
 
 geneInfoFinalJSON <- synStore(File(paste0("./gene_info", ".json"),
@@ -203,29 +229,6 @@ geneInfoFinalJSON <- synStore(File(paste0("./gene_info", ".json"),
                               used=c(geneExprDataId, igapDataId, eqtlDataId, medianExprDataId,
                                      targetListOrigId),
                               forceVersion=FALSE)
-
-
-network <- readr::read_csv(synGet(networkDataId)$path)
-
-network <- network %>%
-  dplyr::select(geneA_ensembl_gene_id, geneB_ensembl_gene_id, brainRegion) %>%
-  left_join(., geneExprData %>% dplyr::select(ensembl_gene_id, hgnc_symbol) %>% distinct(),
-            by=c("geneA_ensembl_gene_id"="ensembl_gene_id")) %>%
-  dplyr::rename(geneA_external_gene_name=hgnc_symbol) %>%
-  left_join(., geneExprData %>% dplyr::select(ensembl_gene_id, hgnc_symbol) %>% distinct(),
-            by=c("geneB_ensembl_gene_id"="ensembl_gene_id")) %>%
-  dplyr::rename(geneB_external_gene_name=hgnc_symbol)
-
-network <- network %>%
-  mutate(geneA_external_gene_name=ifelse(is.na(geneA_external_gene_name),
-                                         geneA_ensembl_gene_id, geneA_external_gene_name),
-         geneB_external_gene_name=ifelse(is.na(geneB_external_gene_name),
-                                         geneB_ensembl_gene_id, geneB_external_gene_name))
-
-
-network <- network %>%
-  filter(geneA_ensembl_gene_id %in% geneExprData$ensembl_gene_id,
-         geneB_ensembl_gene_id %in% geneExprData$ensembl_gene_id)
 
 network %>%
   jsonlite::toJSON() %>%
@@ -236,20 +239,20 @@ networkDataJSON <- synStore(File(paste0(networkOutputFilePrefix, ".json"),
                             used=c(geneExprDataId, networkDataId),
                             forceVersion=FALSE)
 
-networkDataCsv <- synStore(File(paste0(networkOutputFilePrefix, ".csv"),
-                                parent=wotFolderId),
-                           used=c(geneExprDataId, networkDataId),
-                           forceVersion=FALSE)
+# networkDataCsv <- synStore(File(paste0(networkOutputFilePrefix, ".csv"),
+#                                 parent=wotFolderId),
+#                            used=c(geneExprDataId, networkDataId),
+#                            forceVersion=FALSE)
 
 
-medianExprData %>%
-  jsonlite::toJSON() %>%
-  readr::write_lines(paste0("./median_expression", ".json"))
-
-medianExprDataJSON <- synStore(File(paste0("./median_expression", ".json"),
-                                    parent=wotFolderId),
-                               used=c(geneExprDataId, medianExprDataId),
-                               forceVersion=FALSE)
+# medianExprData %>%
+#   jsonlite::toJSON() %>%
+#   readr::write_lines(paste0("./median_expression", ".json"))
+#
+# medianExprDataJSON <- synStore(File(paste0("./median_expression", ".json"),
+#                                     parent=wotFolderId),
+#                                used=c(geneExprDataId, medianExprDataId),
+#                                forceVersion=FALSE)
 
 # network2 <- network %>%
 #   dplyr::group_by(geneA_ensembl_gene_id, geneB_ensembl_gene_id,
@@ -285,6 +288,12 @@ medianExprDataJSON <- synStore(File(paste0("./median_expression", ".json"),
 # edgesForNetwork <- network2 %>%
 #   dplyr::select(from=geneA_ensembl_gene_id, to=geneB_ensembl_gene_id, value, title)
 
+# networkNodesOutputFile <- "./network_nodes.csv"
+# networkEdgesOutputFile <- "./network_edges.csv"
+
+# IMSRId <- 'syn11149859'
+# IMSROutputFilePrefix <- "./IMSR_processed"
+# IMSROutputFile <- "./IMSR_processed.feather"
 # IMSR <- synGet(IMSRId)$path %>%
 #   readr::read_csv() %>%
 #   dplyr::select(`Strain ID`, `Strain/Stock`, Repository, `Gene Symbol`, URL) %>%
@@ -299,6 +308,7 @@ medianExprDataJSON <- synStore(File(paste0("./median_expression", ".json"),
 #
 #
 #
+# scoreDataId <- 'syn11688680'
 # scoreData <- synGet(scoreDataId)$path %>%
 #   readr::read_csv() %>%
 #   dplyr::select(ensembl_gene_id=gene, hgnc_symbol=external_gene_name,
