@@ -86,7 +86,7 @@ geneExprData <- synapser::synGet(geneExprDataId)$path %>%
                                                "MALE"="males only")),
                 # Tissue=stringr::str_replace_all(Tissue, tissuesLookup),
                 Model=stringr::str_replace(Model, "\\.", " x "),
-                Model=stringr::str_replace(Model, "SourceDiagnosis", "Study-specific Diagnosis"),
+                Model=stringr::str_replace(Model, "Diagnosis", "AD Diagnosis"),
                 logFC=round(logFC, digits = 3),
                 fc=2**logFC
   ) %>%
@@ -197,15 +197,15 @@ network <- network %>%
   assertr::verify(geneA_external_gene_name %in% geneInfoFinal$hgnc_symbol) %>%
   assertr::verify(geneB_external_gene_name %in% geneInfoFinal$hgnc_symbol)
 
-networkNested <- network %>%
-  group_by(geneA_ensembl_gene_id, geneB_ensembl_gene_id,
-           geneA_external_gene_name, geneB_external_gene_name) %>%
-  nest(brainRegion) %>%
-  mutate(data=map(data, function(x) list(brainRegion=x$brainRegion))) %>%
-  assertr::verify(geneA_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
-  assertr::verify(geneB_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
-  assertr::verify(geneA_external_gene_name %in% geneInfoFinal$hgnc_symbol) %>%
-  assertr::verify(geneB_external_gene_name %in% geneInfoFinal$hgnc_symbol)
+# networkNested <- network %>%
+#   group_by(geneA_ensembl_gene_id, geneB_ensembl_gene_id,
+#            geneA_external_gene_name, geneB_external_gene_name) %>%
+#   nest(brainRegion) %>%
+#   mutate(data=map(data, function(x) list(brainRegion=x$brainRegion))) %>%
+#   assertr::verify(geneA_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
+#   assertr::verify(geneB_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
+#   assertr::verify(geneA_external_gene_name %in% geneInfoFinal$hgnc_symbol) %>%
+#   assertr::verify(geneB_external_gene_name %in% geneInfoFinal$hgnc_symbol)
 
 
 #########################################
