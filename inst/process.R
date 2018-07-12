@@ -24,7 +24,7 @@ networkOutputFile <- "./network.csv"
 networkOutputFileJson <- "./network.json"
 networkOutputFilePrefix <- "./network"
 
-fGeneExprDataOutputFilePrefix <- "./geneExprData"
+fGeneExprDataOutputFilePrefix <- "./rnaseq_differential_expression"
 
 studiesTable <- synapser::synTableQuery(glue::glue("select * from {studiesTableId}")) %>%
   as.data.frame() %>%
@@ -81,9 +81,9 @@ geneExprData <- synapser::synGet(geneExprDataId)$path %>%
   dplyr::mutate(Study=stringr::str_replace(Study, "MAYO", "MayoRNAseq"),
                 Study=stringr::str_replace(Study, "MSSM", "MSBB"),
                 Sex=stringr::str_replace_all(Sex,
-                                             c("ALL"="Males and females",
-                                               "FEMALE"="Females only",
-                                               "MALE"="Males only")),
+                                             c("ALL"="males and females",
+                                               "FEMALE"="females only",
+                                               "MALE"="males only")),
                 # Tissue=stringr::str_replace_all(Tissue, tissuesLookup),
                 Model=stringr::str_replace(Model, "\\.", " x "),
                 Model=stringr::str_replace(Model, "SourceDiagnosis", "Study-specific Diagnosis"),
@@ -96,13 +96,14 @@ geneExprData <- synapser::synGet(geneExprDataId)$path %>%
 # Maybe for filtering by p-value for a gene
 # that is significant in at least one model
 geneExprData <- geneExprData %>%
-  filter(adj.P.Val <= 0.001 | (ensembl_gene_id %in% nestedTargetListOrig$ensembl_gene_id)) %>%
+  filter(adj.P.Val <= 0.001 | (ensembl_gene_id %in% targetListOrig$ensembl_gene_id)) %>%
   dplyr::select(ensembl_gene_id) %>%
   distinct() %>%
   left_join(., geneExprData)
 
 geneExprData <- geneExprData %>%
-  dplyr::select(ensembl_gene_id, logFC, fc, CI.L, CI.R, adj.P.Val, Tissue, Study, model)
+  dplyr::select(ensembl_gene_id, logFC, fc, CI.L, CI.R,
+                adj.P.Val, Tissue, Study, model)
 
 colnames(geneExprData) <- gsub("\\.", "_", tolower(colnames(geneExprData)))
 
@@ -147,7 +148,8 @@ geneInfoFinal <- geneTableMerged %>%
 geneExprDataFinal <- left_join(geneExprData,
                                geneInfoFinal %>%
                                  dplyr::select(ensembl_gene_id, hgnc_symbol)) %>%
-  filter(!is.na(hgnc_symbol))
+  filter(!is.na(hgnc_symbol)) %>%
+  dplyr::select(ensembl_gene_id, hgnc_symbol, everything())
 
 # Add to gene info
 igapDataId <- "syn12514826"
@@ -182,7 +184,6 @@ network <- network %>%
   filter(geneA_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id,
          geneB_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id)
 
-
 network <- network %>%
   dplyr::select(geneA_ensembl_gene_id, geneB_ensembl_gene_id, brainRegion) %>%
   left_join(., geneInfoFinal %>% dplyr::select(ensembl_gene_id, hgnc_symbol) %>% distinct(),
@@ -190,7 +191,21 @@ network <- network %>%
   dplyr::rename(geneA_external_gene_name=hgnc_symbol) %>%
   left_join(., geneInfoFinal %>% dplyr::select(ensembl_gene_id, hgnc_symbol) %>% distinct(),
             by=c("geneB_ensembl_gene_id"="ensembl_gene_id")) %>%
-  dplyr::rename(geneB_external_gene_name=hgnc_symbol)
+  dplyr::rename(geneB_external_gene_name=hgnc_symbol) %>%
+  assertr::verify(geneA_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
+  assertr::verify(geneB_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
+  assertr::verify(geneA_external_gene_name %in% geneInfoFinal$hgnc_symbol) %>%
+  assertr::verify(geneB_external_gene_name %in% geneInfoFinal$hgnc_symbol)
+
+networkNested <- network %>%
+  group_by(geneA_ensembl_gene_id, geneB_ensembl_gene_id,
+           geneA_external_gene_name, geneB_external_gene_name) %>%
+  nest(brainRegion) %>%
+  mutate(data=map(data, function(x) list(brainRegion=x$brainRegion))) %>%
+  assertr::verify(geneA_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
+  assertr::verify(geneB_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
+  assertr::verify(geneA_external_gene_name %in% geneInfoFinal$hgnc_symbol) %>%
+  assertr::verify(geneB_external_gene_name %in% geneInfoFinal$hgnc_symbol)
 
 
 #########################################
@@ -210,19 +225,23 @@ geneExprDataFinal %>%
   jsonlite::toJSON(pretty=2) %>%
   readr::write_lines(paste0(fGeneExprDataOutputFilePrefix, ".json"))
 
+geneExprDataFinal %>%
+  readr::write_csv((paste0(fGeneExprDataOutputFilePrefix, ".csv")))
+
 fGeneExprDataJSON <- synStore(File(paste0(fGeneExprDataOutputFilePrefix, ".json"),
                                    parent=wotFolderId),
                               used=c(geneExprDataId, tissuesTableId, studiesTableId),
                               forceVersion=FALSE)
 
-# fGeneExprDataCsv <- synStore(File(paste0(fGeneExprDataOutputFilePrefix, ".csv"),
-#                                   parent=wotFolderId),
-#                              used=c(geneExprDataId, tissuesTableId, studiesTableId),
-#                              forceVersion=FALSE)
+fGeneExprDataCsv <- synStore(File(paste0(fGeneExprDataOutputFilePrefix, ".csv"),
+                                  parent=wotFolderId),
+                             used=c(geneExprDataId, tissuesTableId, studiesTableId),
+                             forceVersion=FALSE)
 
 geneInfoFinal %>%
   jsonlite::toJSON(pretty=2) %>%
   readr::write_lines(paste0("./gene_info", ".json"))
+
 
 geneInfoFinalJSON <- synStore(File(paste0("./gene_info", ".json"),
                                    parent=wotFolderId),
@@ -230,14 +249,45 @@ geneInfoFinalJSON <- synStore(File(paste0("./gene_info", ".json"),
                                      targetListOrigId),
                               forceVersion=FALSE)
 
+# geneInfoFinal %>%
+#   readr::write_csv(paste0("./gene_info", ".csv"))
+# geneInfoFinalCsv <- synStore(File(paste0("./gene_info", ".csv"),
+#                                    parent=wotFolderId),
+#                               used=c(geneExprDataId, igapDataId, eqtlDataId, medianExprDataId,
+#                                      targetListOrigId),
+#                               forceVersion=FALSE)
+
 network %>%
-  jsonlite::toJSON() %>%
+  jsonlite::toJSON(pretty=2) %>%
   readr::write_lines(paste0(networkOutputFilePrefix, ".json"))
 
 networkDataJSON <- synStore(File(paste0(networkOutputFilePrefix, ".json"),
                                  parent=wotFolderId),
                             used=c(geneExprDataId, networkDataId),
                             forceVersion=FALSE)
+
+dataFiles <- c(fGeneExprDataJSON, geneInfoFinalJSON,
+               teamInfoJSON, networkDataJSON)
+
+dataManifest <- purrr::map_df(.x=dataFiles,
+                               .f=function(x) data.frame(id=x$properties$id,
+                                                         version=x$properties$versionNumber))
+
+dataManifest %>% readr::write_csv("./data_manifest.csv")
+
+dataManifestCsv <- synStore(File("./data_manifest.csv",
+                                 parent=wotFolderId),
+                            used=dataFiles,
+                            forceVersion=FALSE)
+
+# networkNested %>%
+#   jsonlite::toJSON(pretty=2) %>%
+#   readr::write_lines("network_nested.json")
+#
+# networkNestedDataJSON <- synStore(File("network_nested.json",
+#                                        parent=wotFolderId),
+#                                   used=c(geneExprDataId, networkDataId),
+#                                   forceVersion=FALSE)
 
 # networkDataCsv <- synStore(File(paste0(networkOutputFilePrefix, ".csv"),
 #                                 parent=wotFolderId),
