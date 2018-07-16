@@ -8,14 +8,15 @@ synLogin()
 
 wotFolderId <- 'syn12177492'
 
-geneExprDataId <- 'syn11180450'
-geneFPKMId <- "syn5581268"
-geneCovariatesId <- "syn5581227"
 studiesTableId <- "syn11363298"
 tissuesTableId <- "syn12180244"
 
+geneExprDataId <- 'syn11180450'
 targetListOrigId <- "syn12540368"
 networkDataId <- "syn11685347"
+igapDataId <- "syn12514826"
+eqtlDataId <- "syn12514912"
+medianExprDataId <- "syn12514804"
 
 targetListOutputFile <- "./targetList.csv"
 targetListDistinctOutputFile <- "./targetListDistinct.csv"
@@ -152,20 +153,17 @@ geneExprDataFinal <- left_join(geneExprData,
   dplyr::select(ensembl_gene_id, hgnc_symbol, everything())
 
 # Add to gene info
-igapDataId <- "syn12514826"
 igap <- synGet(igapDataId)$path %>% readr::read_csv()
 
 geneInfoFinal <- geneInfoFinal %>%
   mutate(isIGAP=ensembl_gene_id %in% igap$ensembl_gene_id)
 
-eqtlDataId <- "syn12514912"
 eqtl <- synGet(eqtlDataId)$path %>% readr::read_csv() %>%
   dplyr::select(ensembl_gene_id, haseqtl=hasEqtl)
 
 geneInfoFinal <- geneInfoFinal %>% left_join(eqtl)
 geneInfoFinal$haseqtl[is.na(geneInfoFinal$haseqtl)] <- FALSE
 
-medianExprDataId <- "syn12514804"
 medianExprData <- readr::read_csv(synGet(medianExprDataId)$path) %>%
   filter(ensembl_gene_id %in% geneExprData$ensembl_gene_id) %>%
   dplyr::rename_all(tolower)
