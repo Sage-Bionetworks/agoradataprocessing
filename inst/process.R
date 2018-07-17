@@ -233,6 +233,7 @@ geneInfoFinalJSON <- synStore(File(geneInfoFileJSON,
                                    parent=wotFolderId),
                               used=c(geneExprDataId, igapDataId,
                                      eqtlDataId, medianExprDataId,
+                                     brainExpressionDataId,
                                      targetListOrigId),
                               forceVersion=FALSE)
 
