@@ -49,6 +49,7 @@ keep <- c("Diagnosis AD-CONTROL ALL",
 
 teamMemberInfo <- synGet(teamMemberInfoId)$path %>%
   readr::read_csv() %>%
+  arrange(name) %>%
   group_by(team) %>%
   nest(.key="members")
 
