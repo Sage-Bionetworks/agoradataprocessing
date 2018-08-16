@@ -1,16 +1,17 @@
 library(tidyverse)
-library(mygene)
+# library(mygene)
 library(synapser)
 library(biomaRt)
 library(assertr)
 
 synLogin()
 
-wotFolderId <- 'syn12177492'
+outputFolderId <- 'syn12177492'
 
 studiesTableId <- "syn11363298"
 tissuesTableId <- "syn12180244"
 
+geneRefFlatId <- "syn11098217" # Gencode v24
 geneExprDataId <- 'syn11180450'
 targetListOrigId <- "syn12540368"
 networkDataId <- "syn11685347"
@@ -19,7 +20,7 @@ eqtlDataId <- "syn12514912"
 medianExprDataId <- "syn12514804"
 brainExpressionDataId <- "syn11914808"
 
-# Team info
+# Team and team member info as csv files
 teamInfoId <- "syn12615624"
 teamMemberInfoId <- "syn12615633"
 
@@ -42,10 +43,10 @@ tissuesTable <- synapser::synTableQuery(glue::glue("select * from {tissuesTableI
 tissuesLookup <- setNames(as.character(tissuesTable$name),
                           tissuesTable$shortname)
 
-keep <- c("Diagnosis AD-CONTROL ALL",
-          "Diagnosis.AOD AD-CONTROL ALL",
-          "Diagnosis.Sex AD-CONTROL FEMALE",
-          "Diagnosis.Sex AD-CONTROL MALE")
+modelsToKeep <- c("Diagnosis AD-CONTROL ALL",
+                  "Diagnosis.AOD AD-CONTROL ALL",
+                  "Diagnosis.Sex AD-CONTROL FEMALE",
+                  "Diagnosis.Sex AD-CONTROL MALE")
 
 teamMemberInfo <- synGet(teamMemberInfoId)$path %>%
   readr::read_csv() %>%
@@ -72,10 +73,11 @@ nestedTargetListOrig <- targetListOrig %>%
 
 # Process gene expression (logfc and CI) data
 # Drop existing gene symbol and add them later.
-geneExprData <- synapser::synGet(geneExprDataId)$path %>%
+geneExprDataObj <- synapser::synGet(geneExprDataId)
+geneExprData <- geneExprDataObj$path %>%
   readr::read_tsv() %>%
   dplyr::mutate(tmp=paste(Model, Comparison, Sex, sep=" ")) %>%
-  dplyr::filter(tmp %in% keep) %>%
+  dplyr::filter(tmp %in% modelsToKeep) %>%
   dplyr::select(-tmp) %>%
   dplyr::mutate(Study=stringr::str_replace(Study, "MAYO", "MayoRNAseq"),
                 Study=stringr::str_replace(Study, "MSSM", "MSBB"),
@@ -92,8 +94,8 @@ geneExprData <- synapser::synGet(geneExprDataId)$path %>%
   assertr::verify(Study %in% studiesTable$studyname) %>%
   dplyr::mutate(model=glue::glue("{model} ({sex})", model=Model, sex=Sex))
 
-# Maybe for filtering by p-value for a gene
-# that is significant in at least one model
+# filtering by p-value for a gene that is significant in at least one model or a
+# nominated target
 geneExprData <- geneExprData %>%
   filter(adj.P.Val <= 0.001 | (ensembl_gene_id %in% targetListOrig$ensembl_gene_id)) %>%
   dplyr::select(ensembl_gene_id) %>%
@@ -144,6 +146,11 @@ geneInfoFinal <- geneTableMerged %>%
   dplyr::filter(!is.na(X_id)) %>%
   dplyr::select(-X_id, -X_score)
 
+geneInfoFinal <- left_join(geneInfoFinal, nestedTargetListOrig)
+
+targetListOrig %>%
+  assertr::verify(ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id)
+
 geneExprDataFinal <- left_join(geneExprData,
                                geneInfoFinal %>%
                                  dplyr::select(ensembl_gene_id, hgnc_symbol)) %>%
@@ -183,8 +190,6 @@ nestedMedianExprData <- medianExprData %>%
 
 geneInfoFinal <- left_join(geneInfoFinal, nestedMedianExprData)
 
-geneInfoFinal <- left_join(geneInfoFinal, nestedTargetListOrig)
-
 network <- readr::read_csv(synGet(networkDataId)$path)
 
 network <- network %>%
@@ -213,7 +218,7 @@ teamInfo %>%
   readr::write_lines(teamInfoFileJSON)
 
 teamInfoJSON <- synStore(File(teamInfoFileJSON,
-                              parent=wotFolderId),
+                              parent=outputFolderId),
                          used=c(teamInfoId, teamMemberInfoId),
                          forceVersion=FALSE)
 
@@ -221,8 +226,8 @@ geneExprDataFinal %>%
   jsonlite::toJSON(pretty=2) %>%
   readr::write_lines(diffExprFileJSON)
 
-diffExprDataJSON <- synStore(File(diffExprDataJSON,
-                                  parent=wotFolderId),
+diffExprDataJSON <- synStore(File(diffExprFileJSON,
+                                  parent=outputFolderId),
                              used=c(geneExprDataId, tissuesTableId, studiesTableId),
                              forceVersion=FALSE)
 
@@ -231,7 +236,7 @@ geneInfoFinal %>%
   readr::write_lines(geneInfoFileJSON)
 
 geneInfoFinalJSON <- synStore(File(geneInfoFileJSON,
-                                   parent=wotFolderId),
+                                   parent=outputFolderId),
                               used=c(geneExprDataId, igapDataId,
                                      eqtlDataId, medianExprDataId,
                                      brainExpressionDataId,
@@ -243,7 +248,7 @@ network %>%
   readr::write_lines(networkOutputFileJSON)
 
 networkDataJSON <- synStore(File(networkOutputFileJSON,
-                                 parent=wotFolderId),
+                                 parent=outputFolderId),
                             used=c(geneExprDataId, networkDataId),
                             forceVersion=FALSE)
 
@@ -257,7 +262,7 @@ dataManifest <- purrr::map_df(.x=dataFiles,
 dataManifest %>% readr::write_csv("./data_manifest.csv")
 
 dataManifestCsv <- synStore(File("./data_manifest.csv",
-                                 parent=wotFolderId),
+                                 parent=outputFolderId),
                             used=dataFiles,
                             forceVersion=FALSE)
 
@@ -276,7 +281,7 @@ dataManifestCsv <- synStore(File("./data_manifest.csv",
 #   readr::write_lines("network_nested.json")
 #
 # networkNestedDataJSON <- synStore(File("network_nested.json",
-#                                        parent=wotFolderId),
+#                                        parent=outputFolderId),
 #                                   used=c(geneExprDataId, networkDataId),
 #                                   forceVersion=FALSE)
 
@@ -285,7 +290,7 @@ dataManifestCsv <- synStore(File("./data_manifest.csv",
 #   readr::write_lines(paste0("./median_expression", ".json"))
 #
 # medianExprDataJSON <- synStore(File(paste0("./median_expression", ".json"),
-#                                     parent=wotFolderId),
+#                                     parent=outputFolderId),
 #                                used=c(geneExprDataId, medianExprDataId),
 #                                forceVersion=FALSE)
 
@@ -337,7 +342,7 @@ dataManifestCsv <- synStore(File("./data_manifest.csv",
 #
 # feather::write_feather(IMSR, IMSROutputFile)
 # fIMSR <- synStore(File(IMSROutputFile,
-#                        parent=wotFolderId),
+#                        parent=outputFolderId),
 #                   used=c(IMSRId),
 #                   forceVersion=FALSE)
 #
@@ -386,7 +391,7 @@ dataManifestCsv <- synStore(File("./data_manifest.csv",
 # write_csv(druggabilityData, druggabilityDataOutputFile)
 #
 # fDrugData <- synStore(File(druggabilityDataOutputFile,
-#                            parent=wotFolderId),
+#                            parent=outputFolderId),
 #                       used=druggabilityDataId, forceVersion=FALSE)
 
 ####### Process target list
