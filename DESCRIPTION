@@ -1,4 +1,4 @@
-Package: WallOfTargetsDataProcessing
+Package: AgoraDataProcessing
 Title: What the Package Does (one line, title case)
 Version: 0.0.0.9000
 Authors@R: person("First", "Last", email = "first.last@example.com", role = c("aut", "cre"))
@@ -9,8 +9,7 @@ Encoding: UTF-8
 LazyData: true
 Imports:
   tidyverse,
-  synapser,
-  feather
+  synapser
 Additional_repositories:
   https://sage-bionetworks.github.io/ran
 
