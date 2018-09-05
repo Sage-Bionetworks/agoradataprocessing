@@ -1,7 +1,5 @@
 library(tidyverse)
-# library(mygene)
 library(synapser)
-library(biomaRt)
 library(assertr)
 
 synLogin()
@@ -11,8 +9,8 @@ outputFolderId <- 'syn12177492'
 studiesTableId <- "syn11363298"
 tissuesTableId <- "syn12180244"
 
-geneRefFlatId <- "syn11098217" # Gencode v24
-geneExprDataId <- 'syn11180450'
+mygeneInfoFileId <- 'syn15666826'
+diffExprDataId <- 'syn11180450'
 targetListOrigId <- "syn12540368"
 networkDataId <- "syn11685347"
 igapDataId <- "syn12514826"
@@ -28,6 +26,22 @@ networkOutputFileJSON <- "./network.json"
 diffExprFileJSON <- "./rnaseq_differential_expression.json"
 teamInfoFileJSON <- "./team_info.json"
 geneInfoFileJSON <- "./gene_info.json"
+
+# Required columns for output testing
+geneInfoColumns <- c("ensembl_gene_id", "name",
+                     "summary",
+                     "hgnc_symbol", "alias",
+                     "go.MF", "nominatedtarget",
+                     "nominations", "isIGAP",
+                     "haseqtl", "isChangedInADBrain",
+                     "medianexpression")
+
+diffExprCols <- c("ensembl_gene_id", "logfc", "fc", "ci_l", "ci_r",
+                  "adj_p_val", "tissue", "study", "model", "xxx")
+
+networkCols <- c("geneA_ensembl_gene_id", "geneB_ensembl_gene_id",
+                 "geneA_external_gene_name", "geneB_external_gene_name",
+                 "brainRegion")
 
 studiesTable <- synapser::synTableQuery(glue::glue("select * from {studiesTableId}")) %>%
   as.data.frame() %>%
@@ -71,91 +85,18 @@ nestedTargetListOrig <- targetListOrig %>%
   nest(.key='nominatedtarget') %>%
   mutate(nominations=purrr::map_int(nominatedtarget, nrow))
 
-# Process gene expression (logfc and CI) data
-# Drop existing gene symbol and add them later.
-geneExprDataObj <- synapser::synGet(geneExprDataId)
-geneExprData <- geneExprDataObj$path %>%
-  readr::read_tsv() %>%
-  dplyr::mutate(tmp=paste(Model, Comparison, Sex, sep=" ")) %>%
-  dplyr::filter(tmp %in% modelsToKeep) %>%
-  dplyr::select(-tmp) %>%
-  dplyr::mutate(Study=stringr::str_replace(Study, "MAYO", "MayoRNAseq"),
-                Study=stringr::str_replace(Study, "MSSM", "MSBB"),
-                Sex=stringr::str_replace_all(Sex,
-                                             c("ALL"="males and females",
-                                               "FEMALE"="females only",
-                                               "MALE"="males only")),
-                # Tissue=stringr::str_replace_all(Tissue, tissuesLookup),
-                Model=stringr::str_replace(Model, "\\.", " x "),
-                Model=stringr::str_replace(Model, "Diagnosis", "AD Diagnosis"),
-                logFC=round(logFC, digits = 3),
-                fc=2**logFC
-  ) %>%
-  assertr::verify(Study %in% studiesTable$studyname) %>%
-  dplyr::mutate(model=glue::glue("{model} ({sex})", model=Model, sex=Sex))
+# Do things relying on mygene before loading synapser
+# by running getMyGeneInfo.R
+# now load them as processed there.
+mygeneInfoFileObj <- synGet(mygeneInfoFileId)
+load(mygeneInfoFileObj$path)
 
-# filtering by p-value for a gene that is significant in at least one model or a
-# nominated target
-geneExprData <- geneExprData %>%
-  filter(adj.P.Val <= 0.001 | (ensembl_gene_id %in% targetListOrig$ensembl_gene_id)) %>%
-  dplyr::select(ensembl_gene_id) %>%
-  distinct() %>%
-  left_join(., geneExprData)
-
-geneExprData <- geneExprData %>%
-  dplyr::select(ensembl_gene_id, logFC, fc, CI.L, CI.R,
-                adj.P.Val, Tissue, Study, model)
-
-colnames(geneExprData) <- gsub("\\.", "_", tolower(colnames(geneExprData)))
-
-# For unique list of genes
-geneTable <- geneExprData %>%
-  dplyr::select(ensembl_gene_id) %>%
-  distinct()
-
-# Get current hgnc symbol from biomart
-ensembl <- biomaRt::useMart("ensembl", dataset="hsapiens_gene_ensembl")
-fromBiomart <- biomaRt::getBM(attributes=c("hgnc_symbol", "ensembl_gene_id"),
-                              filters="ensembl_gene_id",
-                              values=geneTable$ensembl_gene_id,
-                              mart=ensembl)
-
-# Use mygene.info to get name and summary
-geneInfoRes <- mygene::getGenes(geneTable$ensembl_gene_id,
-                                fields=c("symbol", "name", "summary",
-                                         "type_of_gene", "alias", "go.MF"))
-
-geneInfo <- geneInfoRes %>%
-  as.data.frame() %>%
-  as.tibble() %>%
-  group_by(query) %>%
-  top_n(1, X_score) %>%
-  ungroup() %>%
-  mutate(go.MF=purrr::map(go.MF, tibble::as_tibble))
-
-geneInfoMerged <- left_join(geneInfo, fromBiomart,
-                            by=c('query'='ensembl_gene_id',
-                                 'symbol'='hgnc_symbol')) %>%
-  as.tibble() %>%
-  distinct()
-
-geneTableMerged <- left_join(geneTable, geneInfoMerged, by=c("ensembl_gene_id"="query"))
-
+# Merge in target info to gene info
 geneInfoFinal <- geneTableMerged %>%
   dplyr::rename(hgnc_symbol=symbol) %>%
   dplyr::filter(!is.na(X_id)) %>%
-  dplyr::select(-X_id, -X_score)
-
-geneInfoFinal <- left_join(geneInfoFinal, nestedTargetListOrig)
-
-targetListOrig %>%
-  assertr::verify(ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id)
-
-geneExprDataFinal <- left_join(geneExprData,
-                               geneInfoFinal %>%
-                                 dplyr::select(ensembl_gene_id, hgnc_symbol)) %>%
-  filter(!is.na(hgnc_symbol)) %>%
-  dplyr::select(ensembl_gene_id, hgnc_symbol, everything())
+  dplyr::select(-X_id, -X_score) %>%
+  full_join(., nestedTargetListOrig)
 
 # Add to gene info
 igap <- synGet(igapDataId)$path %>% readr::read_csv()
@@ -178,10 +119,8 @@ brainExpression <- synapser::synGet(brainExpressionDataId)$path %>%
 geneInfoFinal <- geneInfoFinal %>% left_join(brainExpression)
 geneInfoFinal$isChangedInADBrain[is.na(geneInfoFinal$isChangedInADBrain)] <- FALSE
 
-geneInfoFinal <- geneInfoFinal %>% left_join(eqtl)
-
 medianExprData <- readr::read_csv(synGet(medianExprDataId)$path) %>%
-  filter(ensembl_gene_id %in% geneExprData$ensembl_gene_id) %>%
+  filter(ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
   dplyr::rename_all(tolower)
 
 nestedMedianExprData <- medianExprData %>%
@@ -189,6 +128,52 @@ nestedMedianExprData <- medianExprData %>%
   nest(.key='medianexpression')
 
 geneInfoFinal <- left_join(geneInfoFinal, nestedMedianExprData)
+
+targetListOrig <- targetListOrig %>%
+  assertr::verify(ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id)
+
+# Process gene expression (logfc and CI) data
+# Drop existing gene symbol and add them later.
+diffExprDataObj <- synapser::synGet(diffExprDataId)
+diffExprData <- diffExprDataObj$path %>%
+  readr::read_tsv() %>%
+  dplyr::mutate(tmp=paste(Model, Comparison, Sex, sep=" ")) %>%
+  dplyr::filter(tmp %in% modelsToKeep) %>%
+  dplyr::select(-tmp) %>%
+  dplyr::mutate(Study=stringr::str_replace(Study, "MAYO", "MayoRNAseq"),
+                Study=stringr::str_replace(Study, "MSSM", "MSBB"),
+                Sex=stringr::str_replace_all(Sex,
+                                             c("ALL"="males and females",
+                                               "FEMALE"="females only",
+                                               "MALE"="males only")),
+                # Tissue=stringr::str_replace_all(Tissue, tissuesLookup),
+                Model=stringr::str_replace(Model, "\\.", " x "),
+                Model=stringr::str_replace(Model, "Diagnosis", "AD Diagnosis"),
+                logFC=round(logFC, digits = 3),
+                fc=2**logFC
+  ) %>%
+  assertr::verify(Study %in% studiesTable$studyname) %>%
+  dplyr::mutate(model=glue::glue("{model} ({sex})", model=Model, sex=Sex))
+
+# filtering by p-value for a gene that is significant in at least one model or a
+# nominated target
+diffExprData <- diffExprData %>%
+  filter(adj.P.Val <= 0.001 | (ensembl_gene_id %in% targetListOrig$ensembl_gene_id)) %>%
+  dplyr::select(ensembl_gene_id) %>%
+  distinct() %>%
+  left_join(., diffExprData)
+
+diffExprData <- diffExprData %>%
+  dplyr::select(ensembl_gene_id, logFC, fc, CI.L, CI.R,
+                adj.P.Val, Tissue, Study, model)
+
+colnames(diffExprData) <- gsub("\\.", "_", tolower(colnames(diffExprData)))
+
+diffExprDataFinal <- left_join(diffExprData,
+                               geneInfoFinal %>%
+                                 dplyr::select(ensembl_gene_id, hgnc_symbol)) %>%
+  filter(!is.na(hgnc_symbol)) %>%
+  dplyr::select(ensembl_gene_id, hgnc_symbol, everything())
 
 network <- readr::read_csv(synGet(networkDataId)$path)
 
@@ -204,10 +189,12 @@ network <- network %>%
   left_join(., geneInfoFinal %>% dplyr::select(ensembl_gene_id, hgnc_symbol) %>% distinct(),
             by=c("geneB_ensembl_gene_id"="ensembl_gene_id")) %>%
   dplyr::rename(geneB_external_gene_name=hgnc_symbol) %>%
+  assertr::chain_start() %>%
   assertr::verify(geneA_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
   assertr::verify(geneB_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
   assertr::verify(geneA_external_gene_name %in% geneInfoFinal$hgnc_symbol) %>%
-  assertr::verify(geneB_external_gene_name %in% geneInfoFinal$hgnc_symbol)
+  assertr::verify(geneB_external_gene_name %in% geneInfoFinal$hgnc_symbol) %>%
+  assertr::chain_end()
 
 #########################################
 # Write out all data and store in Synapse
@@ -222,14 +209,7 @@ teamInfoJSON <- synStore(File(teamInfoFileJSON,
                          used=c(teamInfoId, teamMemberInfoId),
                          forceVersion=FALSE)
 
-geneExprDataFinal %>%
-  jsonlite::toJSON(pretty=2) %>%
-  readr::write_lines(diffExprFileJSON)
-
-diffExprDataJSON <- synStore(File(diffExprFileJSON,
-                                  parent=outputFolderId),
-                             used=c(geneExprDataId, tissuesTableId, studiesTableId),
-                             forceVersion=FALSE)
+stopifnot(geneInfoColumns %in% colnames(geneInfoFinal))
 
 geneInfoFinal %>%
   jsonlite::toJSON(pretty=2) %>%
@@ -237,11 +217,24 @@ geneInfoFinal %>%
 
 geneInfoFinalJSON <- synStore(File(geneInfoFileJSON,
                                    parent=outputFolderId),
-                              used=c(geneExprDataId, igapDataId,
+                              used=c(diffExprDataId, igapDataId,
                                      eqtlDataId, medianExprDataId,
                                      brainExpressionDataId,
                                      targetListOrigId),
                               forceVersion=FALSE)
+
+stopifnot(diffExprCols %in% colnames(diffExprDataFinal))
+
+diffExprDataFinal %>%
+  jsonlite::toJSON(pretty=2) %>%
+  readr::write_lines(diffExprFileJSON)
+
+diffExprDataJSON <- synStore(File(diffExprFileJSON,
+                                  parent=outputFolderId),
+                             used=c(diffExprDataId, tissuesTableId, studiesTableId),
+                             forceVersion=FALSE)
+
+stopifnot(networkCols %in% colnames(network))
 
 network %>%
   jsonlite::toJSON(pretty=2) %>%
@@ -249,7 +242,7 @@ network %>%
 
 networkDataJSON <- synStore(File(networkOutputFileJSON,
                                  parent=outputFolderId),
-                            used=c(geneExprDataId, networkDataId),
+                            used=c(diffExprDataId, networkDataId),
                             forceVersion=FALSE)
 
 dataFiles <- c(diffExprDataJSON, geneInfoFinalJSON,
@@ -282,7 +275,7 @@ dataManifestCsv <- synStore(File("./data_manifest.csv",
 #
 # networkNestedDataJSON <- synStore(File("network_nested.json",
 #                                        parent=outputFolderId),
-#                                   used=c(geneExprDataId, networkDataId),
+#                                   used=c(diffExprDataId, networkDataId),
 #                                   forceVersion=FALSE)
 
 # medianExprData %>%
@@ -291,7 +284,7 @@ dataManifestCsv <- synStore(File("./data_manifest.csv",
 #
 # medianExprDataJSON <- synStore(File(paste0("./median_expression", ".json"),
 #                                     parent=outputFolderId),
-#                                used=c(geneExprDataId, medianExprDataId),
+#                                used=c(diffExprDataId, medianExprDataId),
 #                                forceVersion=FALSE)
 
 # network2 <- network %>%
@@ -437,7 +430,7 @@ dataManifestCsv <- synStore(File("./data_manifest.csv",
 #
 # save(ISMR, nTargets, network, targetList, targetListOrig,
 #      druggabilityData, targetManifest, targetListDistinct, genesForNetwork,
-#      gg, geneFPKMLong, gtex, medianGTEx, geneExprData, geneDF, dForFilter,
+#      gg, geneFPKMLong, gtex, medianGTEx, diffExprData, geneDF, dForFilter,
 #      file="./data2load.RData")
 # synStore(File("./data2load.RData", parent="syn7525089"))
 # diffExprData <- synapseClient::synGet("syn11180450") %>%
