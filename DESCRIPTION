@@ -1,10 +1,10 @@
 Package: AgoraDataProcessing
-Title: What the Package Does (one line, title case)
-Version: 0.0.0.9000
-Authors@R: person("First", "Last", email = "first.last@example.com", role = c("aut", "cre"))
-Description: What the package does (one paragraph).
+Title: Process Data from Synapse for AMP-AD Agora
+Version: 0.0.0.9100
+Authors@R: person("Kenneth", "Daily", email = "kenneth.daily@sagebionetworks.org", role = c("aut", "cre"))
+Description: Process data from Synapse for AMP-AD Agora.
 Depends: R (>= 3.4.3)
-License: What license is it under?
+License: Apache License 2.0
 Encoding: UTF-8
 LazyData: true
 Imports:
