@@ -27,6 +27,22 @@ diffExprFileJSON <- "./rnaseq_differential_expression.json"
 teamInfoFileJSON <- "./team_info.json"
 geneInfoFileJSON <- "./gene_info.json"
 
+# Required columns for output testing
+geneInfoColumns <- c("ensembl_gene_id", "name",
+                     "summary",
+                     "hgnc_symbol", "alias",
+                     "go.MF", "nominatedtarget",
+                     "nominations", "isIGAP",
+                     "haseqtl", "isChangedInADBrain",
+                     "medianexpression")
+
+diffExprCols <- c("ensembl_gene_id", "logfc", "fc", "ci_l", "ci_r",
+                  "adj_p_val", "tissue", "study", "model", "xxx")
+
+networkCols <- c("geneA_ensembl_gene_id", "geneB_ensembl_gene_id",
+                 "geneA_external_gene_name", "geneB_external_gene_name",
+                 "brainRegion")
+
 studiesTable <- synapser::synTableQuery(glue::glue("select * from {studiesTableId}")) %>%
   as.data.frame() %>%
   tibble::as_tibble() %>%
@@ -104,7 +120,7 @@ geneInfoFinal <- geneInfoFinal %>% left_join(brainExpression)
 geneInfoFinal$isChangedInADBrain[is.na(geneInfoFinal$isChangedInADBrain)] <- FALSE
 
 medianExprData <- readr::read_csv(synGet(medianExprDataId)$path) %>%
-  filter(ensembl_gene_id %in% diffExprData$ensembl_gene_id) %>%
+  filter(ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
   dplyr::rename_all(tolower)
 
 nestedMedianExprData <- medianExprData %>%
@@ -173,10 +189,12 @@ network <- network %>%
   left_join(., geneInfoFinal %>% dplyr::select(ensembl_gene_id, hgnc_symbol) %>% distinct(),
             by=c("geneB_ensembl_gene_id"="ensembl_gene_id")) %>%
   dplyr::rename(geneB_external_gene_name=hgnc_symbol) %>%
+  assertr::chain_start() %>%
   assertr::verify(geneA_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
   assertr::verify(geneB_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
   assertr::verify(geneA_external_gene_name %in% geneInfoFinal$hgnc_symbol) %>%
-  assertr::verify(geneB_external_gene_name %in% geneInfoFinal$hgnc_symbol)
+  assertr::verify(geneB_external_gene_name %in% geneInfoFinal$hgnc_symbol) %>%
+  assertr::chain_end()
 
 #########################################
 # Write out all data and store in Synapse
@@ -191,6 +209,8 @@ teamInfoJSON <- synStore(File(teamInfoFileJSON,
                          used=c(teamInfoId, teamMemberInfoId),
                          forceVersion=FALSE)
 
+stopifnot(geneInfoColumns %in% colnames(geneInfoFinal))
+
 geneInfoFinal %>%
   jsonlite::toJSON(pretty=2) %>%
   readr::write_lines(geneInfoFileJSON)
@@ -203,6 +223,8 @@ geneInfoFinalJSON <- synStore(File(geneInfoFileJSON,
                                      targetListOrigId),
                               forceVersion=FALSE)
 
+stopifnot(diffExprCols %in% colnames(diffExprDataFinal))
+
 diffExprDataFinal %>%
   jsonlite::toJSON(pretty=2) %>%
   readr::write_lines(diffExprFileJSON)
@@ -211,6 +233,8 @@ diffExprDataJSON <- synStore(File(diffExprFileJSON,
                                   parent=outputFolderId),
                              used=c(diffExprDataId, tissuesTableId, studiesTableId),
                              forceVersion=FALSE)
+
+stopifnot(networkCols %in% colnames(network))
 
 network %>%
   jsonlite::toJSON(pretty=2) %>%
