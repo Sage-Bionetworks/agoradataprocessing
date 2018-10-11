@@ -8,10 +8,11 @@ License: Apache License 2.0
 Encoding: UTF-8
 LazyData: true
 Imports:
-  tidyverse,
-  synapser,
-  assertr
+    tidyverse,
+    synapser,
+    assertr,
+    magrittr
 Additional_repositories:
   https://sage-bionetworks.github.io/ran
-
-  
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 6.1.0
