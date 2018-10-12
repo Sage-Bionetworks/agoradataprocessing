@@ -1,133 +1,48 @@
+#!/usr/bin/env Rscript
+
 library(tidyverse)
 library(synapser)
 library(assertr)
+library(agoradataprocessing)
 
 synLogin()
 
-outputFolderId <- 'syn12177492'
+store <- FALSE
 
-studiesTableId <- "syn11363298"
-tissuesTableId <- "syn12180244"
+config <- jsonlite::fromJSON("./config.json")
 
-mygeneInfoFileId <- 'syn15666826'
-diffExprDataId <- 'syn11180450'
-targetListOrigId <- "syn12540368"
-networkDataId <- "syn11685347"
-igapDataId <- "syn12514826"
-eqtlDataId <- "syn12514912"
-medianExprDataId <- "syn12514804"
-brainExpressionDataId <- "syn11914808"
+studiesTable <- agoradataprocessing::get_studies_table(config$studiesTableId)
 
-# Team and team member info as csv files
-teamInfoId <- "syn12615624"
-teamMemberInfoId <- "syn12615633"
+tissuesTable <- agoradataprocessing::get_tissues_table(config$tissuesTableId)
 
-networkOutputFileJSON <- "./network.json"
-diffExprFileJSON <- "./rnaseq_differential_expression.json"
-teamInfoFileJSON <- "./team_info.json"
-geneInfoFileJSON <- "./gene_info.json"
-
-# Required columns for output testing
-geneInfoColumns <- c("ensembl_gene_id", "name",
-                     "summary",
-                     "hgnc_symbol", "alias",
-                     "go.MF", "nominatedtarget",
-                     "nominations", "isIGAP",
-                     "haseqtl", "isChangedInADBrain",
-                     "medianexpression")
-
-diffExprCols <- c("ensembl_gene_id", "logfc", "fc", "ci_l", "ci_r",
-                  "adj_p_val", "tissue", "study", "model")
-
-networkCols <- c("geneA_ensembl_gene_id", "geneB_ensembl_gene_id",
-                 "geneA_external_gene_name", "geneB_external_gene_name",
-                 "brainRegion")
-
-# threshold for if fdr determines if changed in AD brain
-isChangedInADBrainThreshold <- 0.05
-
-# Threshold for keeping differentially expressed genes
-adjPValThreshold <- 0.001
-
-studiesTable <- synapser::synTableQuery(glue::glue("select * from {studiesTableId}")) %>%
-  as.data.frame() %>%
-  tibble::as_tibble() %>%
-  dplyr::select(-ROW_ID, -ROW_VERSION) %>%
-  dplyr::rename(studyid=Study, studyname=StudyName)
-
-tissuesTable <- synapser::synTableQuery(glue::glue("select * from {tissuesTableId}")) %>%
-  as.data.frame() %>%
-  tibble::as_tibble() %>%
-  dplyr::select(-ROW_ID, -ROW_VERSION)
-
-tissuesLookup <- setNames(as.character(tissuesTable$name),
-                          tissuesTable$shortname)
-
-modelsToKeep <- c("Diagnosis AD-CONTROL ALL",
-                  "Diagnosis.AOD AD-CONTROL ALL",
-                  "Diagnosis.Sex AD-CONTROL FEMALE",
-                  "Diagnosis.Sex AD-CONTROL MALE")
-
-teamMemberInfo <- synGet(teamMemberInfoId)$path %>%
-  readr::read_csv() %>%
-  dplyr::arrange(name) %>%
-  dplyr::group_by(team) %>%
-  tidyr::nest(.key="members")
-
-teamInfo <- synGet(teamInfoId)$path %>%
-  readr::read_csv() %>%
-  dplyr::left_join(teamMemberInfo)
+teamInfo <- agoradataprocessing::get_team_info(config$teamInfoId)
+teamMemberInfo <- agoradataprocessing::get_team_member_info(config$teamMemberInfoId)
+teamInfo <- agoradataprocessing::process_team(teamInfo, teamMemberInfo)
 
 ####### Process target list
-targetListOrig <- synGet(targetListOrigId)$path %>%
-  readr::read_csv() %>%
-  dplyr::select(-hgnc_symbol) %>%
-  dplyr::rename_all(tolower) %>%
-  dplyr::mutate(data_synapseid=stringr::str_split(data_synapseid, ",")) %>%
-  assertr::verify(team %in% teamInfo$team)
+targetListOrig <- agoradataprocessing::get_target_list(config$targetListOrigId) %>%
+  assertr::verify(Team %in% teamInfo$team)
 
-nestedTargetListOrig <- targetListOrig %>%
-  dplyr::group_by(ensembl_gene_id) %>%
-  tidyr::nest(.key='nominatedtarget') %>%
-  dplyr::mutate(nominations=purrr::map_int(nominatedtarget, nrow))
+nestedTargetListOrig <- agoradataprocessing::process_target_list(targetListOrig)
 
 # Do things relying on mygene before loading synapser
 # by running getMyGeneInfo.R
-# now load them as processed there.
-mygeneInfoFileObj <- synGet(mygeneInfoFileId)
-load(mygeneInfoFileObj$path)
-
-# Merge in target info to gene info
-geneInfoFinal <- geneTableMerged %>%
-  dplyr::rename(hgnc_symbol=symbol) %>%
-  dplyr::filter(!is.na(X_id)) %>%
-  dplyr::select(-X_id, -X_score) %>%
-  dplyr::full_join(., nestedTargetListOrig)
+# now load them as processed here
+geneInfoFinal <- agoradataprocessing::get_gene_info_table(config$mygeneInfoFileId)
 
 # Add to gene info
-igap <- synGet(igapDataId)$path %>% readr::read_csv()
+igap <- agoradataprocessing::get_igap(config$igapDataId)
+geneInfoFinal <- agoradataprocessing::process_igap(igap, geneInfoFinal)
 
-geneInfoFinal <- geneInfoFinal %>%
-  dplyr::mutate(isIGAP=ensembl_gene_id %in% igap$ensembl_gene_id)
+eqtl <- agoradataprocessing::get_eqtl(config$eqtlDataId)
+geneInfoFinal <- agoradataprocessing::process_eqtl(eqtl, geneInfoFinal)
 
-eqtl <- synGet(eqtlDataId)$path %>%
-  readr::read_csv() %>%
-  dplyr::select(ensembl_gene_id, haseqtl=hasEqtl)
-
-geneInfoFinal <- geneInfoFinal %>%
-  dplyr::left_join(eqtl)
-geneInfoFinal$haseqtl[is.na(geneInfoFinal$haseqtl)] <- FALSE
-
-brainExpression <- synapser::synGet(brainExpressionDataId)$path %>%
-  readr::read_tsv() %>%
-  dplyr::select(ensembl_gene_id, fdr.random) %>%
-  dplyr::mutate(isChangedInADBrain = fdr.random <= isChangedInADBrainThreshold) %>%
-  dplyr::select(-fdr.random)
+brainExpression <-
 
 geneInfoFinal <- geneInfoFinal %>% left_join(brainExpression)
 geneInfoFinal$isChangedInADBrain[is.na(geneInfoFinal$isChangedInADBrain)] <- FALSE
 
-medianExprData <- readr::read_csv(synGet(medianExprDataId)$path) %>%
+medianExprData <- readr::read_csv(synGet(config$medianExprDataId)$path) %>%
   filter(ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
   dplyr::rename_all(tolower)
 
@@ -137,12 +52,32 @@ nestedMedianExprData <- medianExprData %>%
 
 geneInfoFinal <- left_join(geneInfoFinal, nestedMedianExprData)
 
+# Druggability data
+druggabilityDataObj <- synapser::synGet(config$druggabilityDataId)
+druggabilityData <- druggabilityDataObj$path %>%
+  readr::read_csv() %>%
+  select(-`HGNC Name`) %>%
+  dplyr::rename(ensembl_gene_id=GeneID) %>%
+  assertr::chain_start() %>%
+  assertr::verify(ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
+  assertr::verify(assertr::is_uniq(ensembl_gene_id)) %>%
+  assertr::chain_end()
+
+# Druggability data schemas
+colnames(druggabilityData) <- gsub(" ", "_", tolower(colnames(druggabilityData)))
+
+nestedDruggabilityData <- druggabilityData %>%
+  group_by(ensembl_gene_id) %>%
+  nest(.key='druggability')
+
+geneInfoFinal <- left_join(geneInfoFinal, nestedDruggabilityData)
+
 targetListOrig <- targetListOrig %>%
   assertr::verify(ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id)
 
 # Process gene expression (logfc and CI) data
 # Drop existing gene symbol and add them later.
-diffExprDataObj <- synapser::synGet(diffExprDataId)
+diffExprDataObj <- synapser::synGet(config$diffExprDataId)
 diffExprData <- diffExprDataObj$path %>%
   readr::read_tsv() %>%
   dplyr::mutate(tmp=paste(Model, Comparison, Sex, sep=" ")) %>%
@@ -154,7 +89,6 @@ diffExprData <- diffExprDataObj$path %>%
                                              c("ALL"="males and females",
                                                "FEMALE"="females only",
                                                "MALE"="males only")),
-                # Tissue=stringr::str_replace_all(Tissue, tissuesLookup),
                 Model=stringr::str_replace(Model, "\\.", " x "),
                 Model=stringr::str_replace(Model, "Diagnosis", "AD Diagnosis"),
                 logFC=round(logFC, digits = 3),
@@ -183,7 +117,7 @@ diffExprDataFinal <- left_join(diffExprData,
   filter(!is.na(hgnc_symbol)) %>%
   dplyr::select(ensembl_gene_id, hgnc_symbol, everything())
 
-network <- readr::read_csv(synGet(networkDataId)$path)
+network <- readr::read_csv(synGet(config$networkDataId)$path)
 
 network <- network %>%
   filter(geneA_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id,
@@ -215,53 +149,62 @@ stopifnot(networkCols %in% colnames(network))
 
 teamInfo %>%
   jsonlite::toJSON(pretty=2) %>%
-  readr::write_lines(teamInfoFileJSON)
-
-teamInfoJSON <- synStore(File(teamInfoFileJSON,
-                              parent=outputFolderId),
-                         used=c(teamInfoId, teamMemberInfoId),
-                         forceVersion=FALSE)
+  readr::write_lines(config$teamInfoFileJSON)
 
 geneInfoFinal %>%
   jsonlite::toJSON(pretty=2) %>%
-  readr::write_lines(geneInfoFileJSON)
-
-geneInfoFinalJSON <- synStore(File(geneInfoFileJSON,
-                                   parent=outputFolderId),
-                              used=c(diffExprDataId, igapDataId,
-                                     eqtlDataId, medianExprDataId,
-                                     brainExpressionDataId,
-                                     targetListOrigId),
-                              forceVersion=FALSE)
+  readr::write_lines(config$geneInfoFileJSON)
 
 diffExprDataFinal %>%
   jsonlite::toJSON(pretty=2) %>%
-  readr::write_lines(diffExprFileJSON)
-
-diffExprDataJSON <- synStore(File(diffExprFileJSON,
-                                  parent=outputFolderId),
-                             used=c(diffExprDataId, tissuesTableId, studiesTableId),
-                             forceVersion=FALSE)
+  readr::write_lines(config$diffExprFileJSON)
 
 network %>%
   jsonlite::toJSON(pretty=2) %>%
-  readr::write_lines(networkOutputFileJSON)
+  readr::write_lines(config$networkOutputFileJSON)
 
-networkDataJSON <- synStore(File(networkOutputFileJSON,
-                                 parent=outputFolderId),
-                            used=c(diffExprDataId, networkDataId),
-                            forceVersion=FALSE)
+if (store) {
+  teamInfoJSON <- synStore(File(config$teamInfoFileJSON,
+                                parent=config$outputFolderId),
+                           used=c(teamInfoId, teamMemberInfoId),
+                           forceVersion=FALSE)
 
-dataFiles <- c(diffExprDataJSON, geneInfoFinalJSON,
-               teamInfoJSON, networkDataJSON)
+  geneInfoFinalJSON <- synStore(File(config$geneInfoFileJSON,
+                                     parent=config$outputFolderId),
+                                used=c(diffExprDataId,
+                                       igapDataId,
+                                       eqtlDataId,
+                                       medianExprDataId,
+                                       brainExpressionDataId,
+                                       targetListOrigId,
+                                       druggabilityDataId),
+                                forceVersion=FALSE)
 
-dataManifest <- purrr::map_df(.x=dataFiles,
-                               .f=function(x) data.frame(id=x$properties$id,
-                                                         version=x$properties$versionNumber))
+  diffExprDataJSON <- synStore(File(config$diffExprFileJSON,
+                                    parent=config$outputFolderId),
+                               used=c(diffExprDataId,
+                                      tissuesTableId,
+                                      studiesTableId),
+                               forceVersion=FALSE)
 
-dataManifest %>% readr::write_csv("./data_manifest.csv")
+  networkDataJSON <- synStore(File(config$networkOutputFileJSON,
+                                   parent=config$outputFolderId),
+                              used=c(diffExprDataId, networkDataId),
+                              forceVersion=FALSE)
 
-dataManifestCsv <- synStore(File("./data_manifest.csv",
-                                 parent=outputFolderId),
-                            used=dataFiles,
-                            forceVersion=FALSE)
+  dataFiles <- c(diffExprDataJSON,
+                 geneInfoFinalJSON,
+                 teamInfoJSON,
+                 networkDataJSON)
+
+  dataManifest <- purrr::map_df(.x=dataFiles,
+                                .f=function(x) data.frame(id=x$properties$id,
+                                                          version=x$properties$versionNumber))
+
+  dataManifest %>% readr::write_csv(config$manifestFileCSV)
+
+  dataManifestCsv <- synStore(File(config$manifestFileCSV,
+                                   parent=config$outputFolderId),
+                              used=dataFiles,
+                              forceVersion=FALSE)
+}
