@@ -67,9 +67,9 @@ get_igap <- function(id) {
 #' Add iGAP boolean to gene info table
 #'
 #' @export
-process_igap <- function(igap, gene_info) {
+process_igap <- function(data, gene_info) {
   gene_info %>%
-    dplyr::mutate(isIGAP=ensembl_gene_id %in% igap$ensembl_gene_id)
+    dplyr::mutate(isIGAP=ensembl_gene_id %in% data$ensembl_gene_id)
 }
 
 #' Load eQTL data from Synapse
@@ -80,14 +80,14 @@ get_eqtl <- function(id) {
     readr::read_csv() %>%
     dplyr::rename_all(tolower) %>%
     dplyr::select(ensembl_gene_id, haseqtl)
-
 }
 
 #' Process eQTL data
 #' @export
 process_eqtl <- function(data, gene_info) {
   gene_info %>%
-    dplyr::left_join(data) %>%
+    assertr::has_all_names("ensembl_gene_id", "haseqtl") %>%
+    dplyr::left_join(data, .) %>%
     dplyr::mutate(haseqtl=ifelse(is.na(haseqtl), FALSE, haseqtl))
 }
 
@@ -106,8 +106,9 @@ get_target_list <- function(id) {
 #' @export
 process_target_list <- function(data) {
   data %>%
-    dplyr::select(-hgnc_symbol) %>%
     dplyr::rename_all(tolower) %>%
+    assertr::has_all_names("ensembl_gene_id", "data_synapseid") %>%
+    dplyr::select(-hgnc_symbol) %>%
     dplyr::mutate(data_synapseid=stringr::str_split(data_synapseid, ",")) %>%
     dplyr::group_by(ensembl_gene_id) %>%
     tidyr::nest(.key='nominatedtarget') %>%
@@ -127,7 +128,8 @@ get_brain_expression_data <- function(id) {
 #' @export
 process_brain_expression_data <- function(data, gene_info, fdr.random) {
   data %>%
+    assertr::has_all_names("ensembl_gene_id", "isChangedInADBrain") %>%
     dplyr::mutate(isChangedInADBrain = fdr.random <= isChangedInADBrainThreshold) %>%
     dplyr::select(-fdr.random) %>%
-    left_join(gene_info)
+    left_join(gene_info, .)
 }
