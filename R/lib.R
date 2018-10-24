@@ -274,11 +274,78 @@ process_network_data <- function(data, gene_info) {
     assertr::chain_end()
 
 }
-# Process gene expression (logfc and CI) data
-# Drop existing gene symbol and add them later.
 
-# filtering by p-value for a gene that is significant in at least one model or a
-# nominated target
-# colnames(diffExprData) <- gsub("\\.", "_", tolower(colnames(diffExprData)))
-#
-# diffExprDataFinal <-
+#' @export
+process_data <- function(config) {
+  studiesTable <- agoradataprocessing::get_studies_table(config$studiesTableId)
+
+  tissuesTable <- agoradataprocessing::get_tissues_table(config$tissuesTableId)
+
+  teamInfo <- agoradataprocessing::get_team_info(config$teamInfoId)
+  teamMemberInfo <- agoradataprocessing::get_team_member_info(config$teamMemberInfoId)
+  teamInfo <- agoradataprocessing::process_team(teamInfo, teamMemberInfo)
+
+  # Do things relying on mygene before loading synapser
+  # by running getMyGeneInfo.R
+  # now load them as processed here
+  geneInfoFinal <- agoradataprocessing::get_gene_info_table(config$mygeneInfoFileId)
+  orig_size <- nrow(geneInfoFinal)
+
+  ####### Process target list
+  targetListOrig <- agoradataprocessing::get_target_list(config$targetListOrigId) %>%
+    assertr::verify(Team %in% teamInfo$team)
+
+  geneInfoFinal <- agoradataprocessing::process_target_list(targetListOrig, geneInfoFinal) %>%
+    assertr::verify(nrow(.) == orig_size)
+
+  # Add to gene info
+  igap <- agoradataprocessing::get_igap(config$igapDataId)
+  geneInfoFinal <- agoradataprocessing::process_igap(igap, geneInfoFinal) %>%
+    assertr::verify(nrow(.) == orig_size)
+
+  eqtl <- agoradataprocessing::get_eqtl(config$eqtlDataId)
+  geneInfoFinal <- agoradataprocessing::process_eqtl(eqtl, geneInfoFinal) %>%
+    assertr::verify(nrow(.) == orig_size)
+
+  brain_expression <- agoradataprocessing::get_brain_expression_data(config$brainExpressionDataId)
+
+  geneInfoFinal <- agoradataprocessing::process_brain_expression_data(brain_expression,
+                                                                      geneInfoFinal,
+                                                                      fdr_random_threshold=config$isChangedInADBrainThreshold) %>%
+    assertr::verify(nrow(.) == orig_size)
+
+  median_expr_data <- agoradataprocessing::get_median_expression_data(config$medianExprDataId)
+  geneInfoFinal <- agoradataprocessing::process_median_expression_data(median_expr_data,
+                                                                       geneInfoFinal) %>%
+    assertr::verify(nrow(.) == orig_size)
+
+  # Druggability data
+  druggabilityData <- agoradataprocessing::get_druggability_data(config$druggabilityDataId)
+
+  geneInfoFinal <- agoradataprocessing::process_druggability_data(druggabilityData,
+                                                                  geneInfoFinal) %>%
+    assertr::verify(nrow(.) == orig_size)
+
+
+  # Process gene expression (logfc and CI) data
+  # Drop existing gene symbol and add them later.
+  diffExprData <- agoradataprocessing::get_rnaseq_diff_expr_data(config$diffExprDataId,
+                                                                 models_to_keep = config$modelsToKeep) %>%
+    assertr::verify(study %in% studiesTable$studyname)
+
+  diffExprData <- process_rnaseq_diff_expr_data(diffExprData, gene_info = geneInfoFinal,
+                                                adj_p_value_threshold = config$adjPValThreshold,
+                                                target_list = targetListOrig)
+
+
+  network <- agoradataprocessing::get_network_data(config$networkDataId)
+  network <- agoradataprocessing::process_network_data(network, geneInfoFinal)
+
+  # Data tests
+  stopifnot(config$geneInfoColumns %in% colnames(geneInfoFinal))
+  stopifnot(config$diffExprCols %in% colnames(diffExprData))
+  stopifnot(config$networkCols %in% colnames(network))
+
+  return(list(teamInfo=teamInfo, geneInfo=geneInfoFinal,
+              diffExprData=diffExprData, network=network))
+}
