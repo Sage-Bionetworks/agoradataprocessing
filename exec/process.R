@@ -1,15 +1,26 @@
 #!/usr/bin/env Rscript
 
-library(tidyverse)
-library(synapser)
-library(assertr)
-library(agoradataprocessing)
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(synapser))
+suppressPackageStartupMessages(library(assertr))
+suppressPackageStartupMessages(library(agoradataprocessing))
+suppressPackageStartupMessages(library("optparse"))
+
+option_list <- list(
+  make_option(c("-c", "--config"), type="character",
+              help="Configuration file.", dest="config",
+              metavar="config"),
+  make_option(c("--store"), action="store_true", default=FALSE,
+              dest="store", help="Store in Synapse [default: %default]")
+)
+
+opt <- parse_args(OptionParser(option_list=option_list))
 
 synLogin()
 
 store <- FALSE
 
-config <- jsonlite::fromJSON("./config.json")
+config <- jsonlite::fromJSON(opt$config)
 
 studiesTable <- agoradataprocessing::get_studies_table(config$studiesTableId)
 
@@ -63,18 +74,22 @@ geneInfoFinal <- agoradataprocessing::process_druggability_data(druggabilityData
 
 # Process gene expression (logfc and CI) data
 # Drop existing gene symbol and add them later.
-diffExprData <- agoradataprocessing::get_rnaseq_diff_expr_data(config$diffExprDataId) %>%
+diffExprData <- agoradataprocessing::get_rnaseq_diff_expr_data(config$diffExprDataId,
+                                                               models_to_keep = config$modelsToKeep) %>%
   assertr::verify(study %in% studiesTable$studyname)
 
-diffExprData <-
+diffExprData <- process_rnaseq_diff_expr_data(diffExprData, gene_info = geneInfoFinal,
+                                              adj_p_value_threshold = config$adjPValThreshold,
+                                              target_list = targetListOrig)
+
 
 network <- agoradataprocessing::get_network_data(config$networkDataId)
 network <- agoradataprocessing::process_network_data(network, geneInfoFinal)
 
 # Data tests
-stopifnot(geneInfoColumns %in% colnames(geneInfoFinal))
-stopifnot(diffExprCols %in% colnames(diffExprDataFinal))
-stopifnot(networkCols %in% colnames(network))
+stopifnot(config$geneInfoColumns %in% colnames(geneInfoFinal))
+stopifnot(config$diffExprCols %in% colnames(diffExprData))
+stopifnot(config$networkCols %in% colnames(network))
 
 #########################################
 # Write out all data and store in Synapse
@@ -88,7 +103,7 @@ geneInfoFinal %>%
   jsonlite::toJSON(pretty=2) %>%
   readr::write_lines(config$geneInfoFileJSON)
 
-diffExprDataFinal %>%
+diffExprData %>%
   jsonlite::toJSON(pretty=2) %>%
   readr::write_lines(config$diffExprFileJSON)
 
@@ -96,33 +111,34 @@ network %>%
   jsonlite::toJSON(pretty=2) %>%
   readr::write_lines(config$networkOutputFileJSON)
 
-if (store) {
+if (opt$store) {
   teamInfoJSON <- synStore(File(config$teamInfoFileJSON,
                                 parent=config$outputFolderId),
-                           used=c(teamInfoId, teamMemberInfoId),
+                           used=c(config$teamInfoId, config$teamMemberInfoId),
                            forceVersion=FALSE)
 
   geneInfoFinalJSON <- synStore(File(config$geneInfoFileJSON,
                                      parent=config$outputFolderId),
-                                used=c(diffExprDataId,
-                                       igapDataId,
-                                       eqtlDataId,
-                                       medianExprDataId,
-                                       brainExpressionDataId,
-                                       targetListOrigId,
-                                       druggabilityDataId),
+                                used=c(config$diffExprDataId,
+                                       config$igapDataId,
+                                       config$eqtlDataId,
+                                       config$medianExprDataId,
+                                       config$brainExpressionDataId,
+                                       config$targetListOrigId,
+                                       config$druggabilityDataId),
                                 forceVersion=FALSE)
 
   diffExprDataJSON <- synStore(File(config$diffExprFileJSON,
                                     parent=config$outputFolderId),
-                               used=c(diffExprDataId,
-                                      tissuesTableId,
-                                      studiesTableId),
+                               used=c(config$diffExprDataId,
+                                      config$tissuesTableId,
+                                      config$studiesTableId),
                                forceVersion=FALSE)
 
   networkDataJSON <- synStore(File(config$networkOutputFileJSON,
                                    parent=config$outputFolderId),
-                              used=c(diffExprDataId, networkDataId),
+                              used=c(config$diffExprDataId,
+                                     config$networkDataId),
                               forceVersion=FALSE)
 
   dataFiles <- c(diffExprDataJSON,
