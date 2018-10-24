@@ -216,7 +216,8 @@ get_rnaseq_diff_expr_data <- function(id, models_to_keep) {
 #' @export
 process_rnaseq_diff_expr_data <- function(data, gene_info, adj_p_value_threshold, target_list) {
   keep <- data %>%
-    dplyr::filter(adj_p_val <= adj_p_value_threshold | (ensembl_gene_id %in% target_list$ensembl_gene_id)) %>%
+    dplyr::filter(adj_p_val <= adj_p_value_threshold | (ensembl_gene_id %in% target_list$ensembl_gene_id),
+                  ensembl_gene_id %in% gene_info$ensembl_gene_id) %>%
     dplyr::select(ensembl_gene_id) %>%
     distinct()
 
