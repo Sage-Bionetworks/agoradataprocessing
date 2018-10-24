@@ -19,124 +19,57 @@ teamInfo <- agoradataprocessing::get_team_info(config$teamInfoId)
 teamMemberInfo <- agoradataprocessing::get_team_member_info(config$teamMemberInfoId)
 teamInfo <- agoradataprocessing::process_team(teamInfo, teamMemberInfo)
 
-####### Process target list
-targetListOrig <- agoradataprocessing::get_target_list(config$targetListOrigId) %>%
-  assertr::verify(Team %in% teamInfo$team)
-
-nestedTargetListOrig <- agoradataprocessing::process_target_list(targetListOrig)
-
 # Do things relying on mygene before loading synapser
 # by running getMyGeneInfo.R
 # now load them as processed here
 geneInfoFinal <- agoradataprocessing::get_gene_info_table(config$mygeneInfoFileId)
+orig_size <- nrow(geneInfoFinal)
+
+####### Process target list
+targetListOrig <- agoradataprocessing::get_target_list(config$targetListOrigId) %>%
+  assertr::verify(Team %in% teamInfo$team)
+
+geneInfoFinal <- agoradataprocessing::process_target_list(targetListOrig, geneInfoFinal) %>%
+  assertr::verify(nrow(.) == orig_size)
 
 # Add to gene info
 igap <- agoradataprocessing::get_igap(config$igapDataId)
-geneInfoFinal <- agoradataprocessing::process_igap(igap, geneInfoFinal)
+geneInfoFinal <- agoradataprocessing::process_igap(igap, geneInfoFinal) %>%
+  assertr::verify(nrow(.) == orig_size)
 
 eqtl <- agoradataprocessing::get_eqtl(config$eqtlDataId)
-geneInfoFinal <- agoradataprocessing::process_eqtl(eqtl, geneInfoFinal)
+geneInfoFinal <- agoradataprocessing::process_eqtl(eqtl, geneInfoFinal) %>%
+  assertr::verify(nrow(.) == orig_size)
 
-brainExpression <-
+brain_expression <- agoradataprocessing::get_brain_expression_data(config$brainExpressionDataId)
 
-geneInfoFinal <- geneInfoFinal %>% left_join(brainExpression)
-geneInfoFinal$isChangedInADBrain[is.na(geneInfoFinal$isChangedInADBrain)] <- FALSE
+geneInfoFinal <- agoradataprocessing::process_brain_expression_data(brain_expression,
+                                                                    geneInfoFinal,
+                                                                    fdr_random_threshold=config$isChangedInADBrainThreshold) %>%
+  assertr::verify(nrow(.) == orig_size)
 
-medianExprData <- readr::read_csv(synGet(config$medianExprDataId)$path) %>%
-  filter(ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
-  dplyr::rename_all(tolower)
-
-nestedMedianExprData <- medianExprData %>%
-  group_by(ensembl_gene_id) %>%
-  nest(.key='medianexpression')
-
-geneInfoFinal <- left_join(geneInfoFinal, nestedMedianExprData)
+median_expr_data <- agoradataprocessing::get_median_expression_data(config$medianExprDataId)
+geneInfoFinal <- agoradataprocessing::process_median_expression_data(median_expr_data,
+                                                                     geneInfoFinal) %>%
+  assertr::verify(nrow(.) == orig_size)
 
 # Druggability data
-druggabilityDataObj <- synapser::synGet(config$druggabilityDataId)
-druggabilityData <- druggabilityDataObj$path %>%
-  readr::read_csv() %>%
-  select(-`HGNC Name`) %>%
-  dplyr::rename(ensembl_gene_id=GeneID) %>%
-  assertr::chain_start() %>%
-  assertr::verify(ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
-  assertr::verify(assertr::is_uniq(ensembl_gene_id)) %>%
-  assertr::chain_end()
+druggabilityData <- agoradataprocessing::get_druggability_data(config$druggabilityDataId)
 
-# Druggability data schemas
-colnames(druggabilityData) <- gsub(" ", "_", tolower(colnames(druggabilityData)))
+geneInfoFinal <- agoradataprocessing::process_druggability_data(druggabilityData,
+                                                                geneInfoFinal) %>%
+  assertr::verify(nrow(.) == orig_size)
 
-nestedDruggabilityData <- druggabilityData %>%
-  group_by(ensembl_gene_id) %>%
-  nest(.key='druggability')
-
-geneInfoFinal <- left_join(geneInfoFinal, nestedDruggabilityData)
-
-targetListOrig <- targetListOrig %>%
-  assertr::verify(ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id)
 
 # Process gene expression (logfc and CI) data
 # Drop existing gene symbol and add them later.
-diffExprDataObj <- synapser::synGet(config$diffExprDataId)
-diffExprData <- diffExprDataObj$path %>%
-  readr::read_tsv() %>%
-  dplyr::mutate(tmp=paste(Model, Comparison, Sex, sep=" ")) %>%
-  dplyr::filter(tmp %in% modelsToKeep) %>%
-  dplyr::select(-tmp) %>%
-  dplyr::mutate(Study=stringr::str_replace(Study, "MAYO", "MayoRNAseq"),
-                Study=stringr::str_replace(Study, "MSSM", "MSBB"),
-                Sex=stringr::str_replace_all(Sex,
-                                             c("ALL"="males and females",
-                                               "FEMALE"="females only",
-                                               "MALE"="males only")),
-                Model=stringr::str_replace(Model, "\\.", " x "),
-                Model=stringr::str_replace(Model, "Diagnosis", "AD Diagnosis"),
-                logFC=round(logFC, digits = 3),
-                fc=2**logFC
-  ) %>%
-  assertr::verify(Study %in% studiesTable$studyname) %>%
-  dplyr::mutate(model=glue::glue("{model} ({sex})", model=Model, sex=Sex))
+diffExprData <- agoradataprocessing::get_rnaseq_diff_expr_data(config$diffExprDataId) %>%
+  assertr::verify(study %in% studiesTable$studyname)
 
-# filtering by p-value for a gene that is significant in at least one model or a
-# nominated target
-diffExprData <- diffExprData %>%
-  dplyr::filter(adj.P.Val <= adjPValThreshold | (ensembl_gene_id %in% targetListOrig$ensembl_gene_id)) %>%
-  dplyr::select(ensembl_gene_id) %>%
-  distinct() %>%
-  left_join(., diffExprData)
+diffExprData <-
 
-diffExprData <- diffExprData %>%
-  dplyr::select(ensembl_gene_id, logFC, fc, CI.L, CI.R,
-                adj.P.Val, Tissue, Study, model)
-
-colnames(diffExprData) <- gsub("\\.", "_", tolower(colnames(diffExprData)))
-
-diffExprDataFinal <- left_join(diffExprData,
-                               geneInfoFinal %>%
-                                 dplyr::select(ensembl_gene_id, hgnc_symbol)) %>%
-  filter(!is.na(hgnc_symbol)) %>%
-  dplyr::select(ensembl_gene_id, hgnc_symbol, everything())
-
-network <- readr::read_csv(synGet(config$networkDataId)$path)
-
-network <- network %>%
-  filter(geneA_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id,
-         geneB_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id)
-
-network <- network %>%
-  dplyr::select(geneA_ensembl_gene_id, geneB_ensembl_gene_id, brainRegion) %>%
-  left_join(., geneInfoFinal %>% dplyr::select(ensembl_gene_id, hgnc_symbol) %>% distinct(),
-            by=c("geneA_ensembl_gene_id"="ensembl_gene_id")) %>%
-  dplyr::rename(geneA_external_gene_name=hgnc_symbol) %>%
-  left_join(., geneInfoFinal %>% dplyr::select(ensembl_gene_id, hgnc_symbol) %>% distinct(),
-            by=c("geneB_ensembl_gene_id"="ensembl_gene_id")) %>%
-  dplyr::rename(geneB_external_gene_name=hgnc_symbol) %>%
-  assertr::chain_start() %>%
-  assertr::verify(geneA_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
-  assertr::verify(geneB_ensembl_gene_id %in% geneInfoFinal$ensembl_gene_id) %>%
-  assertr::verify(geneA_external_gene_name %in% geneInfoFinal$hgnc_symbol) %>%
-  assertr::verify(geneB_external_gene_name %in% geneInfoFinal$hgnc_symbol) %>%
-  assertr::chain_end()
+network <- agoradataprocessing::get_network_data(config$networkDataId)
+network <- agoradataprocessing::process_network_data(network, geneInfoFinal)
 
 # Data tests
 stopifnot(geneInfoColumns %in% colnames(geneInfoFinal))
