@@ -4,7 +4,7 @@
 \alias{process_igap}
 \title{Add iGAP boolean to gene info table}
 \usage{
-process_igap(igap, gene_info)
+process_igap(data, gene_info)
 }
 \description{
 Add iGAP boolean to gene info table

@@ -85,9 +85,9 @@ get_eqtl <- function(id) {
 #' Process eQTL data
 #' @export
 process_eqtl <- function(data, gene_info) {
-  gene_info %>%
-    assertr::has_all_names("ensembl_gene_id", "haseqtl") %>%
-    dplyr::left_join(data, .) %>%
+  data %>%
+    assertr::verify(assertr::has_all_names("ensembl_gene_id", "haseqtl")) %>%
+    dplyr::left_join(gene_info, .) %>%
     dplyr::mutate(haseqtl=ifelse(is.na(haseqtl), FALSE, haseqtl))
 }
 
@@ -104,15 +104,16 @@ get_target_list <- function(id) {
 #' and nesting by Ensembl gene id into nominatedtarget column.
 #'
 #' @export
-process_target_list <- function(data) {
+process_target_list <- function(data, gene_info) {
   data %>%
     dplyr::rename_all(tolower) %>%
-    assertr::has_all_names("ensembl_gene_id", "data_synapseid") %>%
+    assertr::verify(assertr::has_all_names("ensembl_gene_id", "data_synapseid")) %>%
     dplyr::select(-hgnc_symbol) %>%
     dplyr::mutate(data_synapseid=stringr::str_split(data_synapseid, ",")) %>%
     dplyr::group_by(ensembl_gene_id) %>%
     tidyr::nest(.key='nominatedtarget') %>%
-    dplyr::mutate(nominations=purrr::map_int(nominatedtarget, nrow))
+    dplyr::mutate(nominations=purrr::map_int(nominatedtarget, nrow)) %>%
+    dplyr::left_join(gene_info, .)
 }
 
 #' Get brain expression data
@@ -126,10 +127,157 @@ get_brain_expression_data <- function(id) {
 
 #' Process brain expression data
 #' @export
-process_brain_expression_data <- function(data, gene_info, fdr.random) {
+process_brain_expression_data <- function(data, gene_info, fdr_random_threshold) {
   data %>%
-    assertr::has_all_names("ensembl_gene_id", "isChangedInADBrain") %>%
-    dplyr::mutate(isChangedInADBrain = fdr.random <= isChangedInADBrainThreshold) %>%
+    assertr::verify(assertr::has_all_names("ensembl_gene_id", "fdr.random")) %>%
+    dplyr::mutate(isChangedInADBrain = fdr.random <= fdr_random_threshold) %>%
     dplyr::select(-fdr.random) %>%
     left_join(gene_info, .)
 }
+
+#' Get median expression data
+#'
+#' @export
+get_median_expression_data <- function(id) {
+  synGet(id)$path %>%
+    readr::read_csv() %>%
+    dplyr::rename_all(tolower) %>%
+    assertr::verify(assertr::has_all_names("ensembl_gene_id", "medianlogcpm", "tissue"))
+}
+
+#' Process median expression data
+#'
+#' @export
+process_median_expression_data <- function(data, gene_info) {
+  data %>%
+    assertr::verify(assertr::has_all_names("ensembl_gene_id")) %>%
+    group_by(ensembl_gene_id) %>%
+    nest(.key='medianexpression') %>%
+    left_join(gene_info, .)
+}
+
+#' Get druggability data from Synapse
+#'
+#' @export
+get_druggability_data <- function(id) {
+  synapser::synGet(id)$path %>%
+    readr::read_csv() %>%
+    select(-`HGNC Name`) %>%
+    dplyr::rename(ensembl_gene_id=GeneID) %>%
+    dplyr::rename_all(tolower) %>%
+    dplyr::rename_all(.funs=stringr::str_replace_all, pattern=" ", replacement="_") %>%
+    assertr::verify(assertr::is_uniq(ensembl_gene_id))
+}
+
+#' Process druggability data
+#'
+#' @export
+process_druggability_data <- function(data, gene_info) {
+  data %>%
+    assertr::chain_start() %>%
+    assertr::verify(ensembl_gene_id %in% gene_info$ensembl_gene_id) %>%
+    assertr::chain_end() %>%
+    group_by(ensembl_gene_id) %>%
+    nest(.key='druggability') %>%
+    left_join(gene_info, .)
+}
+
+#' Get rnaseq differential expression data from Synapse
+#'
+#' @export
+get_rnaseq_diff_expr_data <- function(id, models_to_keep) {
+  synapser::synGet(id)$path %>%
+    readr::read_tsv() %>%
+    dplyr::rename_all(tolower) %>%
+    dplyr::rename_all(.funs=stringr::str_replace_all, pattern=" ", replacement="_") %>%
+    dplyr::rename_all(.funs=stringr::str_replace_all, pattern="\\.", replacement="_") %>%
+    dplyr::mutate(tmp=paste(model, comparison, sex, sep=" ")) %>%
+    dplyr::filter(tmp %in% models_to_keep) %>%
+    dplyr::select(-tmp) %>%
+    dplyr::mutate(study=stringr::str_replace(study, "MAYO", "MayoRNAseq"),
+                  study=stringr::str_replace(study, "MSSM", "MSBB"),
+                  sex=stringr::str_replace_all(sex,
+                                               c("ALL"="males and females",
+                                                 "FEMALE"="females only",
+                                                 "MALE"="males only")),
+                  model=stringr::str_replace(model, "\\.", " x "),
+                  model=stringr::str_replace(model, "Diagnosis", "AD Diagnosis"),
+                  logfc=round(logfc, digits = 3),
+                  fc=2**logfc
+    ) %>%
+    dplyr::mutate(model=glue::glue("{model} ({sex})", model=model, sex=sex))
+  # %>%
+    # dplyr::select(-model) %>%
+    # dplyr::rename(model=tmp)
+}
+
+#' Process rnaseq diff expr data
+#'
+#' @export
+process_rnaseq_diff_expr_data <- function(data, gene_info, adj_p_value_threshold, target_list) {
+  keep <- data %>%
+    dplyr::filter(adj_p_val <= adj_p_value_threshold | (ensembl_gene_id %in% target_list$ensembl_gene_id)) %>%
+    dplyr::select(ensembl_gene_id) %>%
+    distinct()
+
+  data %>%
+    dplyr::filter(ensembl_gene_id %in% keep$ensembl_gene_id) %>%
+    assertr::chain_start() %>%
+    assertr::verify(ensembl_gene_id %in% gene_info$ensembl_gene_id) %>%
+    assertr::chain_end() %>%
+    dplyr::select(ensembl_gene_id, logfc, fc, ci_l, ci_r,
+                  adj_p_val, tissue, study, model) %>%
+    left_join(.,
+              gene_info %>% dplyr::select(ensembl_gene_id, hgnc_symbol),
+              by="ensembl_gene_id") %>%
+    filter(!is.na(hgnc_symbol)) %>%
+    dplyr::select(ensembl_gene_id, hgnc_symbol, everything())
+}
+
+#' Get network data from Synapse
+#'
+#' @export
+get_network_data <- function(id) {
+  synapser::synGet(id)$path %>%
+    readr::read_csv()
+}
+
+#' Process rnaseq diff expr data
+#'
+#' @export
+process_network_data <- function(data, gene_info) {
+  data %>%
+    filter(geneA_ensembl_gene_id %in% gene_info$ensembl_gene_id,
+           geneB_ensembl_gene_id %in% gene_info$ensembl_gene_id) %>%
+    dplyr::select(geneA_ensembl_gene_id,
+                  geneB_ensembl_gene_id, brainRegion) %>%
+    left_join(.,
+              gene_info %>%
+                dplyr::select(ensembl_gene_id,
+                              hgnc_symbol) %>%
+                distinct(),
+              by=c("geneA_ensembl_gene_id"="ensembl_gene_id")) %>%
+    dplyr::rename(geneA_external_gene_name=hgnc_symbol) %>%
+    left_join(.,
+              gene_info %>%
+                dplyr::select(ensembl_gene_id,
+                              hgnc_symbol) %>%
+                distinct(),
+              by=c("geneB_ensembl_gene_id"="ensembl_gene_id")) %>%
+    dplyr::rename(geneB_external_gene_name=hgnc_symbol) %>%
+    assertr::chain_start() %>%
+    assertr::verify(geneA_ensembl_gene_id %in% gene_info$ensembl_gene_id) %>%
+    assertr::verify(geneB_ensembl_gene_id %in% gene_info$ensembl_gene_id) %>%
+    assertr::verify(geneA_external_gene_name %in% gene_info$hgnc_symbol) %>%
+    assertr::verify(geneB_external_gene_name %in% gene_info$hgnc_symbol) %>%
+    assertr::chain_end()
+
+}
+# Process gene expression (logfc and CI) data
+# Drop existing gene symbol and add them later.
+
+# filtering by p-value for a gene that is significant in at least one model or a
+# nominated target
+# colnames(diffExprData) <- gsub("\\.", "_", tolower(colnames(diffExprData)))
+#
+# diffExprDataFinal <-

@@ -6,7 +6,7 @@
 splitting Synapse IDs for data used, and grouping
 and nesting by Ensembl gene id into nominatedtarget column.}
 \usage{
-process_target_list(data)
+process_target_list(data, gene_info)
 }
 \description{
 Process the target list by getting specific columns,
