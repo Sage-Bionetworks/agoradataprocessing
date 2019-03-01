@@ -219,7 +219,7 @@ process_rnaseq_diff_expr_data <- function(data, gene_info, adj_p_value_threshold
     dplyr::filter(adj_p_val <= adj_p_value_threshold | (ensembl_gene_id %in% target_list$ensembl_gene_id),
                   ensembl_gene_id %in% gene_info$ensembl_gene_id) %>%
     dplyr::select(ensembl_gene_id) %>%
-    distinct()
+    dplyr::distinct()
 
   data %>%
     dplyr::filter(ensembl_gene_id %in% keep$ensembl_gene_id) %>%
@@ -228,9 +228,9 @@ process_rnaseq_diff_expr_data <- function(data, gene_info, adj_p_value_threshold
     assertr::chain_end() %>%
     dplyr::select(ensembl_gene_id, logfc, fc, ci_l, ci_r,
                   adj_p_val, tissue, study, model) %>%
-    left_join(.,
-              gene_info %>% dplyr::select(ensembl_gene_id, hgnc_symbol),
-              by="ensembl_gene_id") %>%
+    dplyr::left_join(.,
+                     gene_info %>% dplyr::select(ensembl_gene_id, hgnc_symbol),
+                     by="ensembl_gene_id") %>%
     filter(!is.na(hgnc_symbol)) %>%
     dplyr::select(ensembl_gene_id, hgnc_symbol, everything())
 }
