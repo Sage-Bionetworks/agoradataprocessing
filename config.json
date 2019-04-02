@@ -45,5 +45,5 @@
 
   "isChangedInADBrainThreshold": 0.05,
 
-  "adjPValThreshold": 0.001
+  "adjPValThreshold": 1
 }
