@@ -6,10 +6,10 @@ RUN apt-get install -y curl libcurl4-openssl-dev
 
 ENV R_REMOTES_NO_ERRORS_FROM_WARNINGS=true
 
-COPY . /neurolincsscoring
-WORKDIR /neurolincsscoring
+COPY . /agoradataprocessing
+WORKDIR /agoradataprocessing
 
 RUN Rscript -e 'devtools::install_deps(pkg = ".", dependencies = TRUE, threads = getOption("Ncpus",1))'
 RUN R CMD INSTALL .
 
-COPY exec/tracking_summary_perfect_tracks.R /usr/local/bin/
+COPY exec/process.R /usr/local/bin/
