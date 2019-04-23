@@ -1,6 +1,6 @@
 Package: agoradataprocessing
 Title: Process Data from Synapse for AMP-AD Agora
-Version: 1.2
+Version: 1.2.1
 Authors@R: person("Kenneth", "Daily", email = "kenneth.daily@sagebionetworks.org", role = c("aut", "cre"))
 Description: Process data from Synapse for AMP-AD Agora.
 Depends: R (>= 3.4.3)
