@@ -1,3 +1,4 @@
+[![docker-cloud-automated](https://img.shields.io/docker/cloud/automated/sagebionetworks/agoradataprocessing.svg)](https://cloud.docker.com/u/sagebionetworks/repository/docker/sagebionetworks/agoradataprocessing) [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/sagebionetworks/agoradataprocessing.svg)](https://cloud.docker.com/u/sagebionetworks/repository/docker/sagebionetworks/agoradataprocessing/builds)
 # Agora Data Processing
 
 Script for processing data from Synapse to Agora. This required permissions to read and write to specific location in Synapse. Data is stored in the Synapse project at https://www.synapse.org/agora.
