@@ -1,6 +1,6 @@
 # Agora Data Processing
 
-Script for processing data from Synapse to Agora.
+Script for processing data from Synapse to Agora. This required permissions to read and write to specific location in Synapse.
 
 To process all Agora data from Synapse files to JSON files suitable for import into the Agora MongoDB, use ([exec/process.R](exec/process.R)), which requires the [config.json](config.json) file. Providing the `--store` parameter will store the results to Synapse.
   
