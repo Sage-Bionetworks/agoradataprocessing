@@ -162,7 +162,6 @@ process_median_expression_data <- function(data, gene_info) {
 get_druggability_data <- function(id) {
   synapser::synGet(id)$path %>%
     readr::read_csv() %>%
-    select(-`HGNC Name`) %>%
     dplyr::rename(ensembl_gene_id=GeneID) %>%
     dplyr::rename_all(tolower) %>%
     dplyr::rename_all(.funs=stringr::str_replace_all, pattern=" ", replacement="_") %>%
