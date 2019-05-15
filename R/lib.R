@@ -173,9 +173,6 @@ get_druggability_data <- function(id) {
 #' @export
 process_druggability_data <- function(data, gene_info) {
   data %>%
-    assertr::chain_start() %>%
-    assertr::verify(ensembl_gene_id %in% gene_info$ensembl_gene_id) %>%
-    assertr::chain_end() %>%
     group_by(ensembl_gene_id) %>%
     nest(.key='druggability') %>%
     left_join(gene_info, .)
