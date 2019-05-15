@@ -271,6 +271,14 @@ process_network_data <- function(data, gene_info) {
 
 }
 
+#' Get proteomics data
+#'
+#' @export
+get_proteomics_data <- function(id) {
+  synGet(id)$path %>%
+    readr::read_csv()
+}
+
 #' @export
 process_data <- function(config) {
   studiesTable <- agoradataprocessing::get_studies_table(config$studiesTableId)
@@ -337,11 +345,13 @@ process_data <- function(config) {
   network <- agoradataprocessing::get_network_data(config$networkDataId)
   network <- agoradataprocessing::process_network_data(network, geneInfoFinal)
 
+  proteomics <- get_proteomics_data(config$proteomicsDataId)
+
   # Data tests
   stopifnot(config$geneInfoColumns %in% colnames(geneInfoFinal))
   stopifnot(config$diffExprCols %in% colnames(diffExprData))
   stopifnot(config$networkCols %in% colnames(network))
 
   return(list(teamInfo=teamInfo, geneInfo=geneInfoFinal,
-              diffExprData=diffExprData, network=network))
+              diffExprData=diffExprData, network=network, proteomics=proteomics))
 }
