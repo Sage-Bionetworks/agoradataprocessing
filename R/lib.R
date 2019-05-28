@@ -162,7 +162,6 @@ process_median_expression_data <- function(data, gene_info) {
 get_druggability_data <- function(id) {
   synapser::synGet(id)$path %>%
     readr::read_csv() %>%
-    select(-`HGNC Name`) %>%
     dplyr::rename(ensembl_gene_id=GeneID) %>%
     dplyr::rename_all(tolower) %>%
     dplyr::rename_all(.funs=stringr::str_replace_all, pattern=" ", replacement="_") %>%
@@ -174,9 +173,6 @@ get_druggability_data <- function(id) {
 #' @export
 process_druggability_data <- function(data, gene_info) {
   data %>%
-    assertr::chain_start() %>%
-    assertr::verify(ensembl_gene_id %in% gene_info$ensembl_gene_id) %>%
-    assertr::chain_end() %>%
     group_by(ensembl_gene_id) %>%
     nest(.key='druggability') %>%
     left_join(gene_info, .)
@@ -272,7 +268,17 @@ process_network_data <- function(data, gene_info) {
     assertr::verify(geneA_external_gene_name %in% gene_info$hgnc_symbol) %>%
     assertr::verify(geneB_external_gene_name %in% gene_info$hgnc_symbol) %>%
     assertr::chain_end()
+}
 
+#' Get proteomics data
+#'
+#' @export
+get_proteomics_data <- function(id) {
+  synGet(id)$path %>%
+    readr::read_csv() %>%
+    dplyr::rename(ensembl_gene_id=ENSG) %>%
+    dplyr::rename(hgnc_symbol=GeneName) %>%
+    dplyr::rename_all(tolower)
 }
 
 #' @export
@@ -341,11 +347,13 @@ process_data <- function(config) {
   network <- agoradataprocessing::get_network_data(config$networkDataId)
   network <- agoradataprocessing::process_network_data(network, geneInfoFinal)
 
+  proteomics <- get_proteomics_data(config$proteomicsDataId)
+
   # Data tests
   stopifnot(config$geneInfoColumns %in% colnames(geneInfoFinal))
   stopifnot(config$diffExprCols %in% colnames(diffExprData))
   stopifnot(config$networkCols %in% colnames(network))
 
   return(list(teamInfo=teamInfo, geneInfo=geneInfoFinal,
-              diffExprData=diffExprData, network=network))
+              diffExprData=diffExprData, network=network, proteomics=proteomics))
 }

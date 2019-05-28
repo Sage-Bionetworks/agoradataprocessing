@@ -9,7 +9,7 @@ suppressPackageStartupMessages(library("optparse"))
 option_list <- list(
   make_option(c("-c", "--config"), type="character",
               help="Configuration file.", dest="config",
-              metavar="config"),
+              metavar="config", default = "config-staging.json"),
   make_option(c("--store"), action="store_true", default=FALSE,
               dest="store", help="Store in Synapse [default: %default]")
 )
@@ -44,6 +44,10 @@ processed_data$network %>%
   jsonlite::toJSON(pretty=2) %>%
   readr::write_lines(config$networkOutputFileJSON)
 
+processed_data$proteomics %>%
+  jsonlite::toJSON(pretty=2, na=NULL) %>%
+  readr::write_lines(config$proteomicsFileJSON)
+
 if (opt$store) {
   teamInfoJSON <- synStore(File(config$teamInfoFileJSON,
                                 parent=config$outputFolderId),
@@ -75,10 +79,17 @@ if (opt$store) {
                                      config$networkDataId),
                               forceVersion=FALSE)
 
+  proteomicsDataJSON <- synStore(File(config$proteomicsFileJSON,
+                                      parent=config$outputFolderId),
+                                used=c(config$proteomicsDataId),
+                                forceVersion=FALSE)
+
+
   dataFiles <- c(diffExprDataJSON,
                  geneInfoFinalJSON,
                  teamInfoJSON,
-                 networkDataJSON)
+                 networkDataJSON,
+                 proteomicsDataJSON)
 
   dataManifest <- purrr::map_df(.x=dataFiles,
                                 .f=function(x) data.frame(id=x$properties$id,
