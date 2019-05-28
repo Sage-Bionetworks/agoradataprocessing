@@ -268,7 +268,6 @@ process_network_data <- function(data, gene_info) {
     assertr::verify(geneA_external_gene_name %in% gene_info$hgnc_symbol) %>%
     assertr::verify(geneB_external_gene_name %in% gene_info$hgnc_symbol) %>%
     assertr::chain_end()
-
 }
 
 #' Get proteomics data
@@ -276,7 +275,10 @@ process_network_data <- function(data, gene_info) {
 #' @export
 get_proteomics_data <- function(id) {
   synGet(id)$path %>%
-    readr::read_csv()
+    readr::read_csv() %>%
+    dplyr::rename(ensembl_gene_id=ENSG) %>%
+    dplyr::rename(hgnc_symbol=GeneName) %>%
+    dplyr::rename_all(tolower)
 }
 
 #' @export
