@@ -281,6 +281,35 @@ get_proteomics_data <- function(id) {
     dplyr::rename_all(tolower)
 }
 
+#' Get and process metabolomics. For stats,
+#' - convert list into dataframe
+#' - make id column into factor
+#' - transpose boxplot stats
+#' - trim extraneous columns
+#' Then, join processed stats and gene associations.
+#'
+#' @export
+process_metabolomics <- function(id) {
+  env <- environment()
+  synGet(id)$path %>% load(envir = env)
+
+  is.desired.shape <- function(x) if(identical(dim(x),c(2,5))) return(TRUE) else return(FALSE)
+
+  metabolomics_stats <- agora.metabolite.stats %>%
+    do.call(rbind, .) %>%
+    as.data.frame(stringsAsFactors = FALSE) %>%
+    assertr::verify(assertr::is_uniq(metabolite.id)) %>%
+    dplyr::mutate(metabolite.id=factor(unlist(metabolite.id))) %>%
+    dplyr::mutate(boxplot.stats=map(boxplot.stats,unlist)) %>%
+    dplyr::mutate(transposed.boxplot.stats=lapply(boxplot.stats, t)) %>%
+    # assertr::assert_rows(is.desired.shape,transposed.boxplot.stats) %>%
+    dplyr::select(-metabolite.full.name,-boxplot.stats)
+
+  agora.metabolite.gene.associations %>%
+    dplyr::left_join(metabolomics_stats, by="metabolite.id") %>%
+    assertr::verify(nrow(.) == nrow(agora.metabolite.gene.associations))
+}
+
 #' @export
 process_data <- function(config) {
   studiesTable <- agoradataprocessing::get_studies_table(config$studiesTableId)
@@ -349,11 +378,13 @@ process_data <- function(config) {
 
   proteomics <- get_proteomics_data(config$proteomicsDataId)
 
+  metabolomics <- process_metabolomics(config$metabolomicsDataId)
+
   # Data tests
   stopifnot(config$geneInfoColumns %in% colnames(geneInfoFinal))
   stopifnot(config$diffExprCols %in% colnames(diffExprData))
   stopifnot(config$networkCols %in% colnames(network))
 
   return(list(teamInfo=teamInfo, geneInfo=geneInfoFinal,
-              diffExprData=diffExprData, network=network, proteomics=proteomics))
+              diffExprData=diffExprData, network=network, proteomics=proteomics, metabolomics=metabolomics))
 }

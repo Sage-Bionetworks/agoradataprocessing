@@ -48,6 +48,10 @@ processed_data$proteomics %>%
   jsonlite::toJSON(pretty=2, na=NULL) %>%
   readr::write_lines(config$proteomicsFileJSON)
 
+processed_data$metabolomics %>%
+  jsonlite::toJSON(pretty=2, digits=NA) %>%
+  readr::write_lines(config$metabolomicsFileJSON)
+
 if (opt$store) {
   teamInfoJSON <- synStore(File(config$teamInfoFileJSON,
                                 parent=config$outputFolderId),

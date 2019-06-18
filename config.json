@@ -14,6 +14,7 @@
   "brainExpressionDataId": "syn11914808",
   "druggabilityDataId": "syn13363443",
   "proteomicsDataId": "syn18689335",
+  "metabolomicsDataId": "syn19001410",
 
   "teamInfoId": "syn12615624",
   "teamMemberInfoId": "syn12615633",
@@ -23,6 +24,7 @@
   "teamInfoFileJSON": "/tmp/team_info.json",
   "geneInfoFileJSON": "/tmp/gene_info.json",
   "proteomicsFileJSON": "/tmp/proteomics.json",
+  "metabolomicsFileJSON": "/tmp/metabolomics.json",
   "manifestFileCSV": "/tmp/data_manifest.csv",
 
   "geneInfoColumns": ["ensembl_gene_id", "name",
