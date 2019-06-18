@@ -88,12 +88,17 @@ if (opt$store) {
                                 used=c(config$proteomicsDataId),
                                 forceVersion=FALSE)
 
+  metabolomicsDataJSON <- synStore(File(config$metabolomicsFileJSON,
+                                        parent=config$outputFolderId),
+                                   used=c(config$metabolomicsDataId),
+                                   forceVersion=FALSE)
 
   dataFiles <- c(diffExprDataJSON,
                  geneInfoFinalJSON,
                  teamInfoJSON,
                  networkDataJSON,
-                 proteomicsDataJSON)
+                 proteomicsDataJSON,
+                 metabolomicsDataJSON)
 
   dataManifest <- purrr::map_df(.x=dataFiles,
                                 .f=function(x) data.frame(id=x$properties$id,
