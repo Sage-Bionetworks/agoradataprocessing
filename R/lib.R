@@ -281,7 +281,14 @@ get_proteomics_data <- function(id) {
     dplyr::rename_all(tolower)
 }
 
-#' Get and process metabolomics. For stats,
+#' Get metabolomics data
+#'
+#' @export
+get_metabolomics_data <- function(id, env) {
+  synGet(id)$path %>% load(envir = env)
+}
+
+#' Process metabolomics. For stats,
 #' - convert list into dataframe
 #' - make id column into factor
 #' - transpose boxplot stats
@@ -289,25 +296,37 @@ get_proteomics_data <- function(id) {
 #' Then, join processed stats and gene associations.
 #'
 #' @export
-process_metabolomics <- function(id) {
-  env <- environment()
-  synGet(id)$path %>% load(envir = env)
+process_metabolomics <- function(raw_metabolomics_gene_associations,
+                                 raw_metabolomics_stats) {
 
-  is.desired.shape <- function(x) if(identical(dim(x),c(2,5))) return(TRUE) else return(FALSE)
+  check_shape <- function(x) { identical(dim(x),c(2,5)) }
 
-  metabolomics_stats <- agora.metabolite.stats %>%
+  has_expected_shape <- function(data) {
+    data %>%
+      dplyr::select(transposed.boxplot.stats) %>%
+      map(dim) %>%
+      lapply(check_shape) %>%
+      purrr::keep(.,FALSE) %>%
+      length %>%
+      all.equal(., 0)
+  }
+
+  stats_with_transposed <- raw_metabolomics_stats %>%
     do.call(rbind, .) %>%
     as.data.frame(stringsAsFactors = FALSE) %>%
     assertr::verify(assertr::is_uniq(metabolite.id)) %>%
     dplyr::mutate(metabolite.id=factor(unlist(metabolite.id))) %>%
     dplyr::mutate(boxplot.stats=map(boxplot.stats,unlist)) %>%
-    dplyr::mutate(transposed.boxplot.stats=lapply(boxplot.stats, t)) %>%
-    # assertr::assert_rows(is.desired.shape,transposed.boxplot.stats) %>%
+    dplyr::mutate(transposed.boxplot.stats=lapply(boxplot.stats, t))
+
+  assertthat::assert_that(has_expected_shape(stats_with_transposed))
+
+  metabolomics_stats <- stats_with_transposed %>%
     dplyr::select(-metabolite.full.name,-boxplot.stats)
 
-  agora.metabolite.gene.associations %>%
+  raw_metabolomics_gene_associations %>%
     dplyr::left_join(metabolomics_stats, by="metabolite.id") %>%
-    assertr::verify(nrow(.) == nrow(agora.metabolite.gene.associations))
+    assertr::verify(nrow(.) == nrow(raw_metabolomics_gene_associations))
 }
 
 #' @export
@@ -378,7 +397,10 @@ process_data <- function(config) {
 
   proteomics <- get_proteomics_data(config$proteomicsDataId)
 
-  metabolomics <- process_metabolomics(config$metabolomicsDataId)
+  env <- environment()
+  get_metabolomics_data(config$metabolomicsDataId, env)
+  metabolomics <- process_metabolomics(agora.metabolite.gene.associations,
+                                       agora.metabolite.stats)
 
   # Data tests
   stopifnot(config$geneInfoColumns %in% colnames(geneInfoFinal))
