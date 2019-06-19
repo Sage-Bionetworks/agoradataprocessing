@@ -281,6 +281,54 @@ get_proteomics_data <- function(id) {
     dplyr::rename_all(tolower)
 }
 
+#' Get metabolomics data
+#'
+#' @export
+get_metabolomics_data <- function(id, env) {
+  synGet(id)$path %>% load(envir = env)
+}
+
+#' Process metabolomics. For stats,
+#' - convert list into dataframe
+#' - make id column into factor
+#' - transpose boxplot stats
+#' - trim extraneous columns
+#' Then, join processed stats and gene associations.
+#'
+#' @export
+process_metabolomics <- function(raw_metabolomics_gene_associations,
+                                 raw_metabolomics_stats) {
+
+  check_shape <- function(x) { identical(dim(x),c(2,5)) }
+
+  has_expected_shape <- function(data) {
+    data %>%
+      dplyr::select(transposed.boxplot.stats) %>%
+      map(dim) %>%
+      lapply(check_shape) %>%
+      purrr::keep(.,FALSE) %>%
+      length %>%
+      all.equal(., 0)
+  }
+
+  stats_with_transposed <- raw_metabolomics_stats %>%
+    do.call(rbind, .) %>%
+    as.data.frame(stringsAsFactors = FALSE) %>%
+    assertr::verify(assertr::is_uniq(metabolite.id)) %>%
+    dplyr::mutate(metabolite.id=factor(unlist(metabolite.id))) %>%
+    dplyr::mutate(boxplot.stats=map(boxplot.stats,unlist)) %>%
+    dplyr::mutate(transposed.boxplot.stats=lapply(boxplot.stats, t))
+
+  assertthat::assert_that(has_expected_shape(stats_with_transposed))
+
+  metabolomics_stats <- stats_with_transposed %>%
+    dplyr::select(-metabolite.full.name,-boxplot.stats)
+
+  raw_metabolomics_gene_associations %>%
+    dplyr::left_join(metabolomics_stats, by="metabolite.id") %>%
+    assertr::verify(nrow(.) == nrow(raw_metabolomics_gene_associations))
+}
+
 #' @export
 process_data <- function(config) {
   studiesTable <- agoradataprocessing::get_studies_table(config$studiesTableId)
@@ -349,11 +397,16 @@ process_data <- function(config) {
 
   proteomics <- get_proteomics_data(config$proteomicsDataId)
 
+  env <- environment()
+  get_metabolomics_data(config$metabolomicsDataId, env)
+  metabolomics <- process_metabolomics(agora.metabolite.gene.associations,
+                                       agora.metabolite.stats)
+
   # Data tests
   stopifnot(config$geneInfoColumns %in% colnames(geneInfoFinal))
   stopifnot(config$diffExprCols %in% colnames(diffExprData))
   stopifnot(config$networkCols %in% colnames(network))
 
   return(list(teamInfo=teamInfo, geneInfo=geneInfoFinal,
-              diffExprData=diffExprData, network=network, proteomics=proteomics))
+              diffExprData=diffExprData, network=network, proteomics=proteomics, metabolomics=metabolomics))
 }

@@ -48,6 +48,10 @@ processed_data$proteomics %>%
   jsonlite::toJSON(pretty=2, na=NULL) %>%
   readr::write_lines(config$proteomicsFileJSON)
 
+processed_data$metabolomics %>%
+  jsonlite::toJSON(pretty=2, digits=NA) %>%
+  readr::write_lines(config$metabolomicsFileJSON)
+
 if (opt$store) {
   teamInfoJSON <- synStore(File(config$teamInfoFileJSON,
                                 parent=config$outputFolderId),
@@ -84,12 +88,17 @@ if (opt$store) {
                                 used=c(config$proteomicsDataId),
                                 forceVersion=FALSE)
 
+  metabolomicsDataJSON <- synStore(File(config$metabolomicsFileJSON,
+                                        parent=config$outputFolderId),
+                                   used=c(config$metabolomicsDataId),
+                                   forceVersion=FALSE)
 
   dataFiles <- c(diffExprDataJSON,
                  geneInfoFinalJSON,
                  teamInfoJSON,
                  networkDataJSON,
-                 proteomicsDataJSON)
+                 proteomicsDataJSON,
+                 metabolomicsDataJSON)
 
   dataManifest <- purrr::map_df(.x=dataFiles,
                                 .f=function(x) data.frame(id=x$properties$id,
