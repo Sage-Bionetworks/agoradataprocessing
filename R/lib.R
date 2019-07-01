@@ -298,6 +298,11 @@ get_metabolomics_data <- function(id, env) {
 #' @export
 process_metabolomics <- function(raw_metabolomics_gene_associations,
                                  raw_metabolomics_stats) {
+  standardize_columns <- function(df) {
+    df %>%
+      dplyr::rename_all(tolower) %>%
+      dplyr::rename_all(.funs=stringr::str_replace_all, pattern="\\.", replacement="_")
+  }
 
   check_shape <- function(x) { identical(dim(x),c(2,5)) }
 
@@ -322,10 +327,12 @@ process_metabolomics <- function(raw_metabolomics_gene_associations,
   assertthat::assert_that(has_expected_shape(stats_with_transposed))
 
   metabolomics_stats <- stats_with_transposed %>%
-    dplyr::select(-metabolite.full.name,-boxplot.stats)
+    dplyr::select(-metabolite.full.name,-boxplot.stats) %>%
+    standardize_columns
 
   raw_metabolomics_gene_associations %>%
-    dplyr::left_join(metabolomics_stats, by="metabolite.id") %>%
+    standardize_columns %>%
+    dplyr::left_join(metabolomics_stats, by="metabolite_id") %>%
     assertr::verify(nrow(.) == nrow(raw_metabolomics_gene_associations))
 }
 
