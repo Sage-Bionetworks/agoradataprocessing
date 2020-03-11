@@ -30,7 +30,7 @@
   "geneInfoColumns": ["ensembl_gene_id", "name",
                        "summary",
                        "hgnc_symbol", "alias",
-                       "go.MF", "nominatedtarget",
+                       "go_MF", "nominatedtarget",
                        "nominations", "isIGAP",
                        "haseqtl", "isChangedInADBrain",
                        "medianexpression"],

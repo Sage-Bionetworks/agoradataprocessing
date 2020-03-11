@@ -52,6 +52,7 @@ get_gene_info_table <- function(id) {
   # This rename/filter/select should be moved to getMyGeneInfo.R
   geneTableMerged %>%
     dplyr::rename(hgnc_symbol=symbol) %>%
+    dplyr::rename(go_MF=go.MF) %>%
     dplyr::filter(!is.na(X_id)) %>%
     dplyr::select(-X_id, -X_score)
 }
