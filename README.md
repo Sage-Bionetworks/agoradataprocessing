@@ -15,11 +15,7 @@ The output of this tool is used by the [Agora data manager](https://github.com/S
 
 ## Development
 
-The `master` branch has the most recent changes used in production.
-
-The `develop` branch has the most recent changes that are in testing.
-
-There is a long-running `staging` branch that pushes data to a separate data folder for testing purposes.
+Create a feature branch from `master` for doing development. You can test the data processing locally using the `exec/process.R` command mentioned above. Note that there are separate configurations for staging and production. You will manually run the processing command when your code is ready, as CICD is not set up in this repository (yet).
 
 ### Releases
 
