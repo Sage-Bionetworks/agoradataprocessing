@@ -13,6 +13,7 @@ Imports:
     assertr,
     magrittr
 Additional_repositories:
-  https://sage-bionetworks.github.io/ran
+   http://ran.synapse.org,
+   http://cran.fhcrc.org
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 6.1.1

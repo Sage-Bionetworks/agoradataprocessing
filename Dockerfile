@@ -5,6 +5,7 @@ RUN apt-get install -y dpkg-dev zlib1g-dev libssl-dev libffi-dev
 RUN apt-get install -y curl libcurl4-openssl-dev
 
 ENV R_REMOTES_NO_ERRORS_FROM_WARNINGS=true
+ENV CRYPTOGRAPHY_DONT_BUILD_RUST=true
 
 COPY . /agoradataprocessing
 WORKDIR /agoradataprocessing
