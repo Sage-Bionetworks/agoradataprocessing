@@ -28,7 +28,7 @@ get_team_info <- function(id){
 #'
 #' @export
 get_team_member_info <- function(id) {
-  synGet(id)$path %>%
+    synGet(id)$path %>%
     readr::read_csv() %>%
     dplyr::arrange(name) %>%
     dplyr::group_by(team) %>%
@@ -289,6 +289,16 @@ get_metabolomics_data <- function(id, env) {
   synGet(id)$path %>% load(envir = env)
 }
 
+#' Get entire Synapse table by id (works with both large and small tables)
+#'
+#' @export
+#' 
+get_whole_table <- function (id) {
+    synapser::synTableQuery(glue::glue("select * from {id}"), resultsAs='csv')$filepath %>%
+    readr::read_csv() %>%
+    dplyr::select(everything())
+}
+
 #' Process metabolomics. For stats,
 #' - convert list into dataframe
 #' - make id column into factor
@@ -405,6 +415,10 @@ process_data <- function(config) {
 
   proteomics <- get_proteomics_data(config$proteomicsDataId)
 
+  omics_scores <- get_whole_table(config$omicsScoresTableId)
+  genetics_scores <- get_whole_table(config$geneticsScoresTableId)
+  overall_scores <- get_whole_table(config$overallScoresTableId) %>% dplyr::select(1:6)
+
   env <- environment()
   get_metabolomics_data(config$metabolomicsDataId, env)
   metabolomics <- process_metabolomics(agora.metabolite.gene.associations,
@@ -415,6 +429,11 @@ process_data <- function(config) {
   stopifnot(config$diffExprCols %in% colnames(diffExprData))
   stopifnot(config$networkCols %in% colnames(network))
 
-  return(list(teamInfo=teamInfo, geneInfo=geneInfoFinal,
-              diffExprData=diffExprData, network=network, proteomics=proteomics, metabolomics=metabolomics))
+   return(list(teamInfo=teamInfo, geneInfo=geneInfoFinal,
+              diffExprData=diffExprData, network=network,
+              proteomics=proteomics, metabolomics=metabolomics,
+              omics_scores=omics_scores, 
+              genetics_scores=genetics_scores,
+              overall_scores=overall_scores
+              ))
 }

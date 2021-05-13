@@ -3,6 +3,9 @@
 
   "studiesTableId": "syn11363298",
   "tissuesTableId": "syn12180244",
+  "omicsScoresTableId": "syn22758536",
+  "geneticsScoresTableId": "syn25575153",
+  "overallScoresTableId": "syn25575156",
 
   "mygeneInfoFileId": "syn15666826",
   "diffExprDataId": "syn11180450",
@@ -26,6 +29,9 @@
   "proteomicsFileJSON": "/tmp/proteomics.json",
   "metabolomicsFileJSON": "/tmp/metabolomics.json",
   "manifestFileCSV": "/tmp/data_manifest.csv",
+  "omicsOutputFileJSON": "/tmp/omics_scores.json",
+  "geneticsOutputFileJSON": "/tmp/genetics_scores.json",
+  "overallOutputFileJSON": "/tmp/overall_scores.json",
 
   "geneInfoColumns": ["ensembl_gene_id", "name",
                        "summary",

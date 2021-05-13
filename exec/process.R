@@ -28,6 +28,18 @@ processed_data <- agoradataprocessing::process_data(config = config)
 # Write out all data and store in Synapse
 #########################################
 
+processed_data$omics_scores %>%
+  jsonlite::toJSON(pretty=2, digits=NA) %>%
+  readr::write_lines(config$omicsOutputFileJSON)
+
+processed_data$genetics_scores %>%
+  jsonlite::toJSON(pretty=2, digits=NA) %>%
+  readr::write_lines(config$geneticsOutputFileJSON)
+
+processed_data$overall_scores %>%
+  jsonlite::toJSON(pretty=2, digits=NA) %>%
+  readr::write_lines(config$overallOutputFileJSON)
+
 processed_data$teamInfo %>%
   jsonlite::toJSON(pretty=2) %>%
   readr::write_lines(config$teamInfoFileJSON)
@@ -93,12 +105,31 @@ if (opt$store) {
                                    used=c(config$metabolomicsDataId),
                                    forceVersion=FALSE)
 
+  omicsScoresDataJSON <- synStore(File(config$omicsOutputFileJSON,
+                                        parent=config$outputFolderId),
+                                        used=c(config$omicsScoresTableId),
+                                        forceVersion=FALSE)
+
+  geneticsScoresDataJSON <- synStore(File(config$geneticsOutputFileJSON,
+                                        parent=config$outputFolderId),
+                                        used=c(config$geneticsScoresTableId),
+                                        forceVersion=FALSE)
+
+  overallScoresDataJSON <- synStore(File(config$overallOutputFileJSON,
+                                        parent=config$outputFolderId),
+                                        used=c(config$geneticsScoresTableId,
+                                               config$omicsScoresTableId),
+                                        forceVersion=FALSE)
+
   dataFiles <- c(diffExprDataJSON,
                  geneInfoFinalJSON,
                  teamInfoJSON,
                  networkDataJSON,
                  proteomicsDataJSON,
-                 metabolomicsDataJSON)
+                 metabolomicsDataJSON,
+                 omicsScoresDataJSON,
+                 geneticsScoresDataJSON,
+                 overallScoresDataJSON)
 
   dataManifest <- purrr::map_df(.x=dataFiles,
                                 .f=function(x) data.frame(id=x$properties$id,
