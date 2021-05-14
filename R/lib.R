@@ -417,7 +417,7 @@ process_data <- function(config) {
 
   omics_scores <- get_whole_table(config$omicsScoresTableId)
   genetics_scores <- get_whole_table(config$geneticsScoresTableId)
-  overall_scores <- get_whole_table(config$overallScoresTableId) %>% dplyr::select(1:6)
+  overall_scores <- get_whole_table(config$overallScoresTableId) %>% dplyr::select(3:8)
 
   env <- environment()
   get_metabolomics_data(config$metabolomicsDataId, env)
