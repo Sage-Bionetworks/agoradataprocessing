@@ -292,11 +292,24 @@ get_metabolomics_data <- function(id, env) {
 #' Get entire Synapse table by id (works with both large and small tables)
 #'
 #' @export
-#' 
 get_whole_table <- function (id) {
     synapser::synTableQuery(glue::glue("select * from {id}"), resultsAs='csv')$filepath %>%
     readr::read_csv() %>%
-    dplyr::select(everything())
+    dplyr::select(-ROW_ID, -ROW_VERSION)
+}
+
+#' Load srm data from Synapse
+#'
+#' @export
+get_srm_data <- function(id){
+  synGet(id)$path %>% readr::read_csv()
+}
+
+#' Load target expression validation harmonized data from Synapse
+#'
+#' @export
+get_target_exp_validation_harmonized_data <- function(id){
+  synGet(id)$path %>% readr::read_csv()
 }
 
 #' Process metabolomics. For stats,
@@ -417,7 +430,10 @@ process_data <- function(config) {
 
   omics_scores <- get_whole_table(config$omicsScoresTableId)
   genetics_scores <- get_whole_table(config$geneticsScoresTableId)
-  overall_scores <- get_whole_table(config$overallScoresTableId) %>% dplyr::select(3:8)
+  overall_scores <- get_whole_table(config$overallScoresTableId) %>% dplyr::select(1:6)
+
+  srm_data <- get_srm_data(config$srmDataId)
+  target_exp_validation_harmonized_data <- get_target_exp_validation_harmonized_data(config$targetExpressionValidationHarmonizedId)
 
   env <- environment()
   get_metabolomics_data(config$metabolomicsDataId, env)
@@ -434,6 +450,8 @@ process_data <- function(config) {
               proteomics=proteomics, metabolomics=metabolomics,
               omics_scores=omics_scores, 
               genetics_scores=genetics_scores,
-              overall_scores=overall_scores
+              overall_scores=overall_scores,
+              srm_data=srm_data,
+              target_exp_validation_harmonized_data = target_exp_validation_harmonized_data
               ))
 }

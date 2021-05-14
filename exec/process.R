@@ -64,6 +64,14 @@ processed_data$metabolomics %>%
   jsonlite::toJSON(pretty=2, digits=NA) %>%
   readr::write_lines(config$metabolomicsFileJSON)
 
+processed_data$srm_data %>%
+  jsonlite::toJSON(pretty=2, digits=NA) %>%
+  readr::write_lines(config$srmDataOutputFileJSON)
+
+processed_data$target_exp_validation_harmonized_data %>%
+  jsonlite::toJSON(pretty=2, digits=NA) %>%
+  readr::write_lines(config$targetExpValidationHarmonizedOutputFileJSON)
+
 if (opt$store) {
   teamInfoJSON <- synStore(File(config$teamInfoFileJSON,
                                 parent=config$outputFolderId),
@@ -121,6 +129,16 @@ if (opt$store) {
                                                config$omicsScoresTableId),
                                         forceVersion=FALSE)
 
+  srmDataJSON <- synStore(File(config$srmDataOutputFileJSON,
+                                        parent=config$outputFolderId),
+                                        used=c(config$srmDataId),
+                                        forceVersion=FALSE)
+
+  targetExpValidationHarmonizedDataJSON <- synStore(File(config$targetExpValidationHarmonizedOutputFileJSON,
+                                        parent=config$outputFolderId),
+                                        used=c(config$targetExpressionValidationHarmonizedId),
+                                        forceVersion=FALSE)
+
   dataFiles <- c(diffExprDataJSON,
                  geneInfoFinalJSON,
                  teamInfoJSON,
@@ -129,7 +147,9 @@ if (opt$store) {
                  metabolomicsDataJSON,
                  omicsScoresDataJSON,
                  geneticsScoresDataJSON,
-                 overallScoresDataJSON)
+                 overallScoresDataJSON,
+                 srmDataJSON,
+                 targetExpValidationHarmonizedDataJSON)
 
   dataManifest <- purrr::map_df(.x=dataFiles,
                                 .f=function(x) data.frame(id=x$properties$id,
