@@ -452,6 +452,6 @@ process_data <- function(config) {
               genetics_scores=genetics_scores,
               overall_scores=overall_scores,
               srm_data=srm_data,
-              target_exp_validation_harmonized_data = target_exp_validation_harmonized_data
+              target_exp_validation_harmonized_data=target_exp_validation_harmonized_data
               ))
 }
