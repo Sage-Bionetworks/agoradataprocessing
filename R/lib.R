@@ -108,6 +108,7 @@ get_target_list <- function(id) {
 process_target_list <- function(data, gene_info) {
   data %>%
     dplyr::rename_all(tolower) %>%
+    dplyr::rename_all(.funs=stringr::str_replace_all, pattern=" ", replacement="_") %>%
     assertr::verify(assertr::has_all_names("ensembl_gene_id", "data_synapseid")) %>%
     dplyr::select(-hgnc_symbol) %>%
     dplyr::mutate(data_synapseid=stringr::str_split(data_synapseid, ",")) %>%
