@@ -137,6 +137,20 @@ process_brain_expression_data <- function(data, gene_info, fdr_random_threshold)
     left_join(gene_info, .)
 }
 
+process_rna_change_in_the_brain <- function(gene_info, diff_exp) {
+  rna_changed_data <- diff_exp %>%
+      dplyr::select(ensembl_gene_id, adj_p_val) %>%
+      assertr::verify(not_na(ensembl_gene_id)) %>%
+      dplyr::mutate(is_any_rna_changed_in_AD_brain = adj_p_val <= 0.05) %>%
+      dplyr::select(-adj_p_val) %>%
+      dplyr::group_by(ensembl_gene_id) %>%
+      dplyr::summarise(isAnyRNAChangedInADBrain = first(is_any_rna_changed_in_AD_brain))
+
+  data <- gene_info %>%
+      assertr::verify(not_na(ensembl_gene_id)) %>%
+      left_join(., rna_changed_data, by = c("ensembl_gene_id"))
+}
+
 #' Get median expression data
 #'
 #' @export
@@ -423,6 +437,7 @@ process_data <- function(config) {
                                                 adj_p_value_threshold = config$adjPValThreshold,
                                                 target_list = targetListOrig)
 
+  geneInfoFinal <- process_rna_change_in_the_brain(geneInfoFinal, diffExprData)
 
   network <- agoradataprocessing::get_network_data(config$networkDataId)
   network <- agoradataprocessing::process_network_data(network, geneInfoFinal)
