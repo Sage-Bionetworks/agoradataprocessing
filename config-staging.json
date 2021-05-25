@@ -3,9 +3,12 @@
 
   "studiesTableId": "syn11363298",
   "tissuesTableId": "syn12180244",
+  "omicsScoresTableId": "syn22758536",
+  "geneticsScoresTableId": "syn25575153",
+  "overallScoresTableId": "syn25575156",
 
   "mygeneInfoFileId": "syn15666826",
-  "diffExprDataId": "syn11180450",
+  "diffExprDataId": "syn14237651",
   "targetListOrigId": "syn12540368",
   "networkDataId": "syn11685347",
   "igapDataId": "syn12514826",
@@ -15,6 +18,8 @@
   "druggabilityDataId": "syn13363443",
   "proteomicsDataId": "syn18689335",
   "metabolomicsDataId": "syn19001410",
+  "srmDataId": "syn25454540",
+  "targetExpressionValidationHarmonizedId": "syn24184512",
 
   "teamInfoId": "syn12615624",
   "teamMemberInfoId": "syn12615633",
@@ -26,6 +31,11 @@
   "proteomicsFileJSON": "/tmp/proteomics.json",
   "metabolomicsFileJSON": "/tmp/metabolomics.json",
   "manifestFileCSV": "/tmp/data_manifest.csv",
+  "omicsOutputFileJSON": "/tmp/omics_scores.json",
+  "geneticsOutputFileJSON": "/tmp/genetics_scores.json",
+  "overallOutputFileJSON": "/tmp/overall_scores.json",
+  "srmDataOutputFileJSON": "/tmp/srm_data.json",
+  "targetExpValidationHarmonizedOutputFileJSON": "/tmp/target_exp_validation_harmonized.json",
 
   "geneInfoColumns": ["ensembl_gene_id", "name",
                        "summary",
