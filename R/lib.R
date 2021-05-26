@@ -141,11 +141,11 @@ process_rna_change_in_the_brain <- function(gene_info, diff_exp) {
   rna_changed_data <- diff_exp %>%
       dplyr::select(ensembl_gene_id, adj_p_val) %>%
       assertr::verify(not_na(ensembl_gene_id)) %>%
-      dplyr::mutate(is_any_rna_changed_in_AD_brain = adj_p_val <= 0.05) %>%
-      dplyr::select(-adj_p_val) %>%
       dplyr::group_by(ensembl_gene_id) %>%
-      dplyr::summarise(isAnyRNAChangedInADBrain = first(is_any_rna_changed_in_AD_brain))
-
+      dplyr::summarise(minimum_adj_p_value = min(adj_p_val)) %>%
+      dplyr::mutate(isAnyRNAChangedInADBrain = minimum_adj_p_value <= 0.05) %>%
+      dplyr::select(- minimum_adj_p_value)
+      
   data <- gene_info %>%
       assertr::verify(not_na(ensembl_gene_id)) %>%
       left_join(., rna_changed_data, by = c("ensembl_gene_id"))
@@ -457,6 +457,9 @@ process_data <- function(config) {
                                        agora.metabolite.stats)
 
   # Data tests
+
+  colnames(geneInfoFinal)
+
   stopifnot(config$geneInfoColumns %in% colnames(geneInfoFinal))
   stopifnot(config$diffExprCols %in% colnames(diffExprData))
   stopifnot(config$networkCols %in% colnames(network))
