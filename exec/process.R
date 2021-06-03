@@ -68,6 +68,10 @@ processed_data$srm_data %>%
   jsonlite::toJSON(pretty=2, digits=NA) %>%
   readr::write_lines(config$srmDataOutputFileJSON)
 
+processed_data$neuropath_data %>%
+  jsonlite::toJSON(pretty=2, digits=NA) %>%
+  readr::write_lines(config$neuropathOutputFileJSON)
+
 processed_data$target_exp_validation_harmonized_data %>%
   jsonlite::toJSON(pretty=2, digits=NA) %>%
   readr::write_lines(config$targetExpValidationHarmonizedOutputFileJSON)
@@ -134,6 +138,11 @@ if (opt$store) {
                                         used=c(config$srmDataId),
                                         forceVersion=FALSE)
 
+  neuroPathDataJSON <- synStore(File(config$neuropathOutputFileJSON,
+                                        parent=config$outputFolderId),
+                                        used=c(config$neuropathDataId),
+                                        forceVersion=FALSE)
+
   targetExpValidationHarmonizedDataJSON <- synStore(File(config$targetExpValidationHarmonizedOutputFileJSON,
                                         parent=config$outputFolderId),
                                         used=c(config$targetExpressionValidationHarmonizedId),
@@ -149,6 +158,7 @@ if (opt$store) {
                  geneticsScoresDataJSON,
                  overallScoresDataJSON,
                  srmDataJSON,
+                 neuroPathDataJSON,
                  targetExpValidationHarmonizedDataJSON)
 
   dataManifest <- purrr::map_df(.x=dataFiles,
