@@ -106,7 +106,7 @@ get_target_list <- function(id) {
 #'
 #' @export
 process_target_list <- function(data, gene_info) {
-  data %>%
+  intermediate_data <- data %>%
     dplyr::rename_all(tolower) %>%
     dplyr::rename_all(.funs=stringr::str_replace_all, pattern=" ", replacement="_") %>%
     assertr::verify(assertr::has_all_names("ensembl_gene_id", "data_synapseid")) %>%
@@ -116,6 +116,24 @@ process_target_list <- function(data, gene_info) {
     tidyr::nest(.key='nominatedtarget') %>%
     dplyr::mutate(nominations=purrr::map_int(nominatedtarget, nrow)) %>%
     dplyr::left_join(gene_info, .)
+
+  # data has 693 columns
+  # print(colnames(data))
+  # validation_data <- data %>% 
+  #   dplyr::rename_all(tolower) %>%
+  #   dplyr::rename_all(.funs=stringr::str_replace_all, pattern=" ", replacement="_") %>%
+  #   dplyr::select(ensembl_gene_id, validation_study_details) %>% 
+  #   dplyr::group_by(ensembl_gene_id) %>% 
+  #   dplyr::summarise(unique_study_details = toString(sort(unique(validation_study_details))))
+  
+  # print(validation_data)
+
+  
+
+  # one esembl_gene_id value per row == 57169
+  # intermediate_data <- intermediate_data %>% dplyr::select(validation_study_details) %>% dplyr::group_by(validation_study_details)
+  # print(nrow(intermediate_data))
+  
 }
 
 #' Get brain expression data
@@ -135,6 +153,37 @@ process_brain_expression_data <- function(data, gene_info, fdr_random_threshold)
     dplyr::mutate(isChangedInADBrain = fdr.random <= fdr_random_threshold) %>%
     dplyr::select(-fdr.random) %>%
     left_join(gene_info, .)
+}
+
+process_rna_change_in_the_brain <- function(gene_info, diff_exp) {
+
+  print(colnames(gene_info))
+
+  rna_changed_data <- diff_exp %>%
+      dplyr::select(ensembl_gene_id, adj_p_val) %>%
+      assertr::verify(not_na(ensembl_gene_id)) %>%
+      dplyr::group_by(ensembl_gene_id) %>%
+      dplyr::summarise(minimum_adj_p_value = min(adj_p_val)) %>%
+      dplyr::mutate(isAnyRNAChangedInADBrain = minimum_adj_p_value <= 0.05) %>%
+      dplyr::select(- minimum_adj_p_value)
+      
+  data <- gene_info %>%
+      assertr::verify(not_na(ensembl_gene_id)) %>%
+      left_join(., rna_changed_data, by = c("ensembl_gene_id"))
+}
+
+#' Combine Proteomics Data with Gene Info
+#' Relationship between esemble_gene_id and Cor_PVal is 1:n
+#' 
+#' @export 
+process_proteomics_data <- function(gene_info, proteomics) {
+proteomics %>% 
+  dplyr::select(ensembl_gene_id, cor_pval) %>%
+  dplyr::group_by(ensembl_gene_id) %>%
+  dplyr::mutate(min_cor_pval = min(cor_pval)) %>%
+  dplyr::mutate(isAnyProteinChangedInADBrain = cor_pval <= 0.05) %>%
+  dplyr::select(-min_cor_pval, -cor_pval) %>%
+  dplyr::left_join(gene_info, ., by=c("ensembl_gene_id"))
 }
 
 #' Get median expression data
@@ -423,6 +472,7 @@ process_data <- function(config) {
                                                 adj_p_value_threshold = config$adjPValThreshold,
                                                 target_list = targetListOrig)
 
+  geneInfoFinal <- process_rna_change_in_the_brain(geneInfoFinal, diffExprData)
 
   network <- agoradataprocessing::get_network_data(config$networkDataId)
   network <- agoradataprocessing::process_network_data(network, geneInfoFinal)
@@ -435,6 +485,8 @@ process_data <- function(config) {
 
   srm_data <- get_srm_data(config$srmDataId)
   target_exp_validation_harmonized_data <- get_target_exp_validation_harmonized_data(config$targetExpressionValidationHarmonizedId)
+
+  geneInfoFinal <- process_proteomics_data(geneInfoFinal, proteomics)
 
   env <- environment()
   get_metabolomics_data(config$metabolomicsDataId, env)
