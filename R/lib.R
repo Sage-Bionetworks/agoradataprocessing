@@ -106,7 +106,7 @@ get_target_list <- function(id) {
 #'
 #' @export
 process_target_list <- function(data, gene_info) {
-  intermediate_data <- data %>%
+  data %>%
     dplyr::rename_all(tolower) %>%
     dplyr::rename_all(.funs=stringr::str_replace_all, pattern=" ", replacement="_") %>%
     assertr::verify(assertr::has_all_names("ensembl_gene_id", "data_synapseid")) %>%
@@ -116,24 +116,6 @@ process_target_list <- function(data, gene_info) {
     tidyr::nest(.key='nominatedtarget') %>%
     dplyr::mutate(nominations=purrr::map_int(nominatedtarget, nrow)) %>%
     dplyr::left_join(gene_info, .)
-
-  # data has 693 columns
-  # print(colnames(data))
-  # validation_data <- data %>% 
-  #   dplyr::rename_all(tolower) %>%
-  #   dplyr::rename_all(.funs=stringr::str_replace_all, pattern=" ", replacement="_") %>%
-  #   dplyr::select(ensembl_gene_id, validation_study_details) %>% 
-  #   dplyr::group_by(ensembl_gene_id) %>% 
-  #   dplyr::summarise(unique_study_details = toString(sort(unique(validation_study_details))))
-  
-  # print(validation_data)
-
-  
-
-  # one esembl_gene_id value per row == 57169
-  # intermediate_data <- intermediate_data %>% dplyr::select(validation_study_details) %>% dplyr::group_by(validation_study_details)
-  # print(nrow(intermediate_data))
-  
 }
 
 #' Get brain expression data
@@ -156,8 +138,6 @@ process_brain_expression_data <- function(data, gene_info, fdr_random_threshold)
 }
 
 process_rna_change_in_the_brain <- function(gene_info, diff_exp) {
-
-  print(colnames(gene_info))
 
   rna_changed_data <- diff_exp %>%
       dplyr::select(ensembl_gene_id, adj_p_val) %>%
@@ -355,6 +335,13 @@ get_srm_data <- function(id){
   synGet(id)$path %>% readr::read_csv()
 }
 
+#' Load neuropath data from Synapse
+#'
+#' @export
+get_neuropath_data <- function(id){
+  synGet(id)$path %>% readr::read_csv() %>% dplyr::rename_all(tolower)
+}
+
 #' Load target expression validation harmonized data from Synapse
 #'
 #' @export
@@ -488,6 +475,8 @@ process_data <- function(config) {
 
   geneInfoFinal <- process_proteomics_data(geneInfoFinal, proteomics)
 
+  neuropath_data <- get_neuropath_data(config$neuropathDataId)
+
   env <- environment()
   get_metabolomics_data(config$metabolomicsDataId, env)
   metabolomics <- process_metabolomics(agora.metabolite.gene.associations,
@@ -505,6 +494,7 @@ process_data <- function(config) {
               genetics_scores=genetics_scores,
               overall_scores=overall_scores,
               srm_data=srm_data,
+              neuropath_data=neuropath_data,
               target_exp_validation_harmonized_data=target_exp_validation_harmonized_data
               ))
 }

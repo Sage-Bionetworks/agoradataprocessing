@@ -20,6 +20,7 @@
   "metabolomicsDataId": "syn19001410",
   "srmDataId": "syn25454540",
   "targetExpressionValidationHarmonizedId": "syn24184512",
+  "neuropathDataId":"syn22017882",
 
   "teamInfoId": "syn12615624",
   "teamMemberInfoId": "syn12615633",
@@ -36,6 +37,7 @@
   "overallOutputFileJSON": "/tmp/overall_scores.json",
   "srmDataOutputFileJSON": "/tmp/srm_data.json",
   "targetExpValidationHarmonizedOutputFileJSON": "/tmp/target_exp_validation_harmonized.json",
+  "neuropathOutputFileJSON":"/tmp/neuropath_corr.json",
   
 
 
