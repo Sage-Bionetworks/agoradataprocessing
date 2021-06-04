@@ -160,9 +160,9 @@ process_proteomics_data <- function(gene_info, proteomics) {
 proteomics %>% 
   dplyr::select(ensembl_gene_id, cor_pval) %>%
   dplyr::group_by(ensembl_gene_id) %>%
-  dplyr::mutate(min_cor_pval = min(cor_pval)) %>%
-  dplyr::mutate(isAnyProteinChangedInADBrain = cor_pval <= 0.05) %>%
-  dplyr::select(-min_cor_pval, -cor_pval) %>%
+  dplyr::summarise(min_cor_pval = min(cor_pval)) %>%
+  dplyr::mutate(isAnyProteinChangedInADBrain = min_cor_pval <= 0.05) %>%
+  dplyr::select(-min_cor_pval) %>%
   dplyr::left_join(gene_info, ., by=c("ensembl_gene_id"))
 }
 
@@ -460,7 +460,7 @@ process_data <- function(config) {
                                                 target_list = targetListOrig)
 
   geneInfoFinal <- process_rna_change_in_the_brain(geneInfoFinal, diffExprData)
-
+  
   network <- agoradataprocessing::get_network_data(config$networkDataId)
   network <- agoradataprocessing::process_network_data(network, geneInfoFinal)
 
