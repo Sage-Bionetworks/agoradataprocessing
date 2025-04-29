@@ -1,3 +1,21 @@
+# ⚠️ DEPRECATED REPOSITORY
+
+**This repository has been deprecated and is no longer maintained.**
+- No further development will occur in this repository.
+- This repository will not be monitored.
+
+
+## New Repository Location
+
+Agora's data processing is now managed via the agora-data-tools project:
+
+**[https://github.com/Sage-Bionetworks/agora-data-tools](https://github.com/Sage-Bionetworks/agora-data-tools)**
+
+
+For information, see the [agora-data-tools README](https://github.com/Sage-Bionetworks/agora-data-tools/blob/dev/README.md)).
+
+----
+
 [![docker-cloud-automated](https://img.shields.io/docker/cloud/automated/sagebionetworks/agoradataprocessing.svg)](https://cloud.docker.com/u/sagebionetworks/repository/docker/sagebionetworks/agoradataprocessing) [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/sagebionetworks/agoradataprocessing.svg)](https://cloud.docker.com/u/sagebionetworks/repository/docker/sagebionetworks/agoradataprocessing/builds)
 # Agora Data Processing
 
